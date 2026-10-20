@@ -149,6 +149,46 @@ void main() {
     expect(app.h.clicks.single.actionType, 'dismiss');
   });
 
+  testWidgets('fullscreen: the X stays when the message has no other way out', (tester) async {
+    final app = await pumpApp(tester, [
+      inAppMessage('f', layout: 'fullscreen', content: {'title': 'Full', 'close_button': false}),
+    ]);
+    expect(find.byKey(const Key('dak-in-app-close')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('dak-in-app-close')));
+    await tester.pumpAndSettle();
+    expect(find.text('Full'), findsNothing);
+    expect(await app.events(), ['impression f', 'dismiss f']);
+
+    final tappable = await pumpApp(tester, [
+      inAppMessage('t', layout: 'fullscreen', content: {
+        'title': 'Tap me',
+        'close_button': false,
+        'click_action': {'type': 'deep_link', 'url': 'app://offer'},
+      }),
+    ]);
+    expect(find.text('Tap me'), findsOneWidget);
+    expect(find.byKey(const Key('dak-in-app-close')), findsNothing, reason: 'a tap on it is the way out');
+    await tester.tap(find.text('Tap me'));
+    await tester.pumpAndSettle();
+    expect(tappable.h.clicks.single.url, 'app://offer');
+  });
+
+  testWidgets('the impression counts once a frame has drawn the message', (tester) async {
+    final app = await pumpApp(tester, [
+      inAppMessage('cart', triggers: [
+        [
+          {'kind': 'custom', 'key': 'screen', 'op': '=', 'value': 'cart'}
+        ]
+      ]),
+    ]);
+    app.c.addTriggers({'screen': 'cart'});
+    expect(app.c.current.value?.id, 'cart');
+    expect(app.c.pendingEvents, 0, reason: 'not drawn yet');
+    await tester.pump();
+    expect(find.text('Title cart'), findsOneWidget);
+    expect(app.c.pendingEvents, 1);
+  });
+
   testWidgets('top banner: the app stays usable, a tap runs click_action', (tester) async {
     final app = await pumpApp(tester, [
       inAppMessage('t', layout: 'banner_top', content: {

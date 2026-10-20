@@ -104,7 +104,10 @@ class _DakInAppHostState extends State<DakInAppHost> {
       }
     }
     setState(() => _shown = show);
-    c.didDisplay(m);
+    // Counted once a frame shows it; an app in the background draws none.
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (mounted && identical(_c, c) && token == _token && c.current.value?.id == m.id) c.didDisplay(m);
+    });
   }
 
   static Future<bool> _precache(BuildContext context, String url) async {
