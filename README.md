@@ -8,6 +8,23 @@ Android and iOS. Delivery goes through your own Firebase project (FCM, and
 APNs via the key in Firebase), so pushes cost nothing. Works with
 firebase_messaging 15, 16 and 17.
 
+Moving from OneSignal? See [Migrating from OneSignal](doc/migrating-from-onesignal.md).
+
+## Requirements
+
+| | Minimum |
+|---|---|
+| Flutter | 3.22 (Dart 3.4) |
+| Android | minSdk 23 (Android 6.0) |
+| iOS | 15.0 |
+| firebase_messaging | 15, 16 or 17 (with firebase_core 3, 4 or 5) |
+| Server | A Dak server, and a Firebase project whose service account the Dak app uses |
+
+iOS 15 is what Firebase's iOS SDK 12 (firebase_messaging 16 and 17) needs,
+and flutter_secure_storage 10 needs Android 23. CI checks the oldest and
+newest Flutter, each firebase_messaging major, and the lowest dependency
+versions the pubspec allows.
+
 ## Install
 
 Until the package is on pub.dev, add it from this repository:
@@ -22,9 +39,40 @@ dependencies:
 `pubspec.lock` keeps the exact commit; `flutter pub upgrade dak_push` takes
 the newest.
 
-The app needs Firebase set up as usual (`google-services.json`,
-`GoogleService-Info.plist`, Push Notifications capability on iOS). Remove
-other push SDKs (OneSignal) so only one library handles notifications.
+The app needs Firebase set up as usual (`flutterfire configure`, which writes
+`google-services.json` and `GoogleService-Info.plist`), and the APNs key
+uploaded in Firebase (Project settings → Cloud Messaging). Remove other push
+SDKs (OneSignal) so only one library handles notifications.
+
+## Platform setup
+
+**Android:** raise the minimum SDK in `android/app/build.gradle.kts` (or
+`build.gradle`) if it is below 23:
+
+```kotlin
+defaultConfig {
+    minSdk = 23 // or flutter.minSdkVersion, which is 24 from Flutter 3.35
+}
+```
+
+**iOS:**
+
+1. Set the deployment target to 15.0: in `ios/Podfile`,
+
+   ```ruby
+   platform :ios, '15.0'
+   ```
+
+   and in Xcode, Runner target → General → Minimum Deployments → iOS 15.0.
+   Then run `pod install` in `ios/` (or `flutter build ios`, which runs it).
+2. In Xcode, Runner target → Signing & Capabilities → + Capability:
+   - **Push Notifications.**
+   - **Background Modes**, with **Remote notifications** ticked. Silent (data
+     only) pushes need it: without it iOS does not wake the app for them.
+     iOS also limits how often it wakes an app this way, so do not rely on
+     silent pushes for anything that must arrive.
+3. Optional: the [notification service extension](doc/ios-notification-service-extension.md)
+   for delivered receipts, images, buttons and badge increments.
 
 ## Use
 
@@ -232,3 +280,77 @@ arrived and were opened (with the button), which in-app messages were shown,
 clicked or dismissed, and the UTC offset only if you turn it on. Nothing else:
 no IP, location, phone number, email or device model. In-app triggers stay on
 the phone.
+
+## Troubleshooting
+
+Turn on `DakOptions(debugLogs: true)` first: in debug builds the SDK prints
+what it registers, sends and retries.
+
+**`pod install` says a pod "required a higher minimum deployment target".**
+Set `platform :ios, '15.0'` in `ios/Podfile` and the Runner target to iOS 15
+(see [Platform setup](#platform-setup)), then run `pod install --repo-update`
+in `ios/`.
+
+**Android build: "minSdkVersion 21 cannot be smaller than version 23 declared in
+library".** Set `minSdk = 23` or higher in `android/app/build.gradle.kts`.
+
+**The device never shows up on the server.**
+- Check `appId` and `baseUrl` (the server's public URL, without `/v1`). Use
+  `https`: plain `http` needs cleartext traffic allowed on Android and an App
+  Transport Security exception on iOS.
+- The Dak app needs the service account of the same Firebase project as the
+  app's `google-services.json` / `GoogleService-Info.plist`.
+- On iOS a push token exists only after APNs registration: use a real device,
+  with the Push Notifications capability and the APNs key uploaded in Firebase.
+
+**Pushes arrive on Android but not on iOS.** Usually APNs: upload the APNs
+key in Firebase (Project settings → Cloud Messaging, under the iOS app with
+the right bundle id), and check that the Runner target has the Push
+Notifications capability in the build you run.
+
+**Nothing appears while the app is open.** Expected on Android: FCM does not
+show messages to an open app. Listen to `Dak.onForeground` and call
+`Dak.showNotification(n)` if you want the system notification. On iOS pass
+`DakOptions(showInForegroundOnIOS: true)`.
+
+**`login` throws `DakException`.** The server rejected the request for good:
+usually the `authHash` does not match (identity verification is on, and the
+hash must be `hex(HMAC-SHA256(key: identity secret, message: user id))` over
+the exact same user id string). `ArgumentError` means a bad user id or tag, before
+anything was sent.
+
+**The "delivered" count stays at 0 on iOS.** iOS does not run app code for
+visible pushes; set up the [notification service extension](doc/ios-notification-service-extension.md)
+with the same App Group in the app, the extension and `DakOptions(iosAppGroup:)`.
+
+**Buttons do not appear on iOS.** They are added by the notification service
+extension. Long-press the notification to see them.
+
+**`actionId` is null for button taps on iOS with firebase_messaging 15 or 16.**
+Make your `AppDelegate` the notification center's delegate (see
+[Buttons](#buttons)).
+
+**Android pushes that arrive in the background are not counted as delivered.**
+Firebase keeps one `onBackgroundMessage` handler per app, and a handler your
+app sets replaces Dak's. Pass `DakOptions(handleBackgroundMessages: false)`
+and call `Dak.handleBackgroundMessage` from your handler (see
+[Delivered receipts](#delivered-receipts)).
+
+**In-app messages never show.** Check that `MaterialApp(builder: Dak.inAppBuilder)`
+(or a `DakInAppHost`) is in place, that `Dak.pauseInApp(true)` is not left on,
+that no `DakInAppBlock` covers the screen, and that the message's triggers can
+be met. Messages are fetched at session start: restart the app, or come back
+after the session timeout (5 minutes by default).
+
+**Another push SDK is still installed.** Two libraries handling the same FCM
+messages leads to duplicates and lost taps. Remove the other one; see
+[Migrating from OneSignal](doc/migrating-from-onesignal.md).
+
+## Security
+
+Report security problems privately, as [SECURITY.md](SECURITY.md) describes,
+not in a public issue.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
