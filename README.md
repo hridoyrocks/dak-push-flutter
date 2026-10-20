@@ -27,17 +27,21 @@ versions the pubspec allows.
 
 ## Install
 
-Until the package is on pub.dev, add it from this repository:
+Until the package is on pub.dev, add it from this repository, pinned to a
+release tag:
 
 ```yaml
 dependencies:
   dak_push:
     git:
       url: https://github.com/hridoyrocks/dak-push-flutter.git
+      ref: v0.4.0
 ```
 
-`pubspec.lock` keeps the exact commit; `flutter pub upgrade dak_push` takes
-the newest.
+To update, change `ref` to a newer tag from the
+[releases](https://github.com/hridoyrocks/dak-push-flutter/releases) and read
+the [CHANGELOG](CHANGELOG.md) for breaking changes. Without `ref`, apps get
+whatever `main` is when `pubspec.lock` is made.
 
 The app needs Firebase set up as usual (`flutterfire configure`, which writes
 `google-services.json` and `GoogleService-Info.plist`), and the APNs key
