@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:dak_push/dak_push.dart';
 import 'package:dak_push/src/background.dart';
+import 'package:dak_push/src/client.dart' show kDakSdkVersion;
 import 'package:dak_push/src/messaging.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -289,7 +290,7 @@ void main() {
     expect(h.server.opened, ['old-open']);
     final patch = h.server.requests.first.body;
     expect(patch.containsKey('token'), isFalse, reason: 'an unchanged token keeps its (default) type');
-    expect(patch['sdk_version'], '0.3.0');
+    expect(patch['sdk_version'], kDakSdkVersion);
     final saved = jsonDecode(storage.value!) as Map<String, dynamic>;
     expect(saved['v'], 2);
     expect(saved['base_url'], 'https://push.test');

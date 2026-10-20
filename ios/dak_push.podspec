@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'dak_push'
-  s.version          = '0.3.0'
+  s.version          = '0.4.0'
   s.summary          = 'Flutter SDK for Dak, a self-hosted push notification server.'
   s.description      = <<-DESC
 Shares what the Dak notification service extension needs with it, sets the

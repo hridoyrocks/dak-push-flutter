@@ -12,7 +12,7 @@ import 'notification.dart';
 import 'platform_info.dart';
 import 'storage.dart';
 
-const kDakSdkVersion = '0.3.0';
+const kDakSdkVersion = '0.4.0';
 
 /// A problem the app has to fix, such as a wrong auth hash or a bad tag.
 /// Network trouble never throws: changes are kept and sent later.

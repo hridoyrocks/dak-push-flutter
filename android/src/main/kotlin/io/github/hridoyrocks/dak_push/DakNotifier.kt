@@ -1,5 +1,6 @@
 package io.github.hridoyrocks.dak_push
 
+import android.Manifest
 import android.app.ActivityManager
 import android.app.KeyguardManager
 import android.app.NotificationChannel
@@ -8,8 +9,10 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Resources
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.drawable.AdaptiveIconDrawable
 import android.os.Build
 import android.os.Bundle
 import androidx.core.app.NotificationCompat
@@ -71,13 +74,16 @@ object DakNotifier {
         }
     }
 
-    /** Builds and shows the notification. Call it off the main thread: it may download the image. */
-    fun show(context: Context, data: Map<String, String>) {
+    /**
+     * Builds and shows the notification; false when nothing was shown. Call it off the main thread: it may
+     * download the image.
+     */
+    fun show(context: Context, data: Map<String, String>): Boolean {
         val title = data["_dak_title"].orEmpty()
         val body = data["_dak_body"].orEmpty()
-        if (title.isEmpty() && body.isEmpty()) return
+        if (title.isEmpty() && body.isEmpty()) return false
         val manager = NotificationManagerCompat.from(context)
-        if (!manager.areNotificationsEnabled()) return
+        if (!manager.areNotificationsEnabled()) return false
 
         val tag = data["_dak_tag"]?.takeIf { it.isNotEmpty() } ?: data["_dak_id"] ?: "dak"
         val id = tag.hashCode()
@@ -90,7 +96,16 @@ object DakNotifier {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(launch(context, data, null, tag, id, 0))
         color(context)?.let { builder.color = it }
-        if (data["_dak_sound"] == "none") builder.setSilent(true)
+        if (data["_dak_sound"] == "none") {
+            builder.setSilent(true)
+        } else {
+            // Below Android 8 there are no channels: sound, light and vibration come from here.
+            var defaults = NotificationCompat.DEFAULT_SOUND or NotificationCompat.DEFAULT_LIGHTS
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.VIBRATE) == PackageManager.PERMISSION_GRANTED) {
+                defaults = defaults or NotificationCompat.DEFAULT_VIBRATE
+            }
+            builder.setDefaults(defaults)
+        }
         data["_dak_badge_inc"]?.toIntOrNull()?.takeIf { it > 0 }?.let { builder.setNumber(it) }
         image(data["_dak_image"])?.let {
             builder.setLargeIcon(it)
@@ -99,17 +114,21 @@ object DakNotifier {
         parseButtons(data["_dak_buttons"]).forEachIndexed { i, b ->
             builder.addAction(0, b.text, launch(context, data, b.id, tag, id, i + 1))
         }
-        try {
+        return try {
             manager.notify(tag, id, builder.build())
+            true
         } catch (e: SecurityException) {
             // No POST_NOTIFICATIONS permission (Android 13+).
+            false
         }
     }
 
     /** Opens the app with the message's data and the tapped button, which the plugin hands to Dart. */
     private fun launch(context: Context, data: Map<String, String>, action: String?, tag: String, id: Int, n: Int): PendingIntent {
         val intent = context.packageManager.getLaunchIntentForPackage(context.packageName) ?: Intent()
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        // CLEAR_TOP: with another of the app's activities on top (a camera, a login page), the tap still
+        // reaches the Flutter activity (onNewIntent) instead of being lost.
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         intent.putExtra(EXTRA_DATA, Bundle().apply { data.forEach { (k, v) -> putString(k, v) } })
         intent.putExtra(EXTRA_TAG, tag)
         intent.putExtra(EXTRA_ID, id)
@@ -137,9 +156,24 @@ object DakNotifier {
         null
     }
 
+    /** Like FCM: the manifest's default icon, else the app icon, else the system's; never an adaptive icon. */
     private fun smallIcon(context: Context): Int {
+        val res = context.resources
         val icon = meta(context)?.getInt("com.google.firebase.messaging.default_notification_icon", 0) ?: 0
-        return if (icon != 0) icon else context.applicationInfo.icon
+        if (icon != 0 && isValidIcon(res, icon)) return icon
+        val app = context.applicationInfo.icon
+        if (app != 0 && isValidIcon(res, app)) return app
+        return android.R.drawable.sym_def_app_icon
+    }
+
+    /** Android 8.0 crashes the system UI on an adaptive icon as the small icon (FCM's isValidIcon). */
+    private fun isValidIcon(res: Resources, id: Int): Boolean {
+        if (Build.VERSION.SDK_INT != Build.VERSION_CODES.O) return true
+        return try {
+            res.getDrawable(id, null) !is AdaptiveIconDrawable
+        } catch (e: Resources.NotFoundException) {
+            false
+        }
     }
 
     private fun color(context: Context): Int? {
