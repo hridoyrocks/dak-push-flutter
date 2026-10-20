@@ -12,3 +12,7 @@ linter:
     - prefer_final_locals
     - public_member_api_docs
     - unawaited_futures
+
+# Read by dart format from Dart 3.7 on (CI, IDEs, pub.dev).
+formatter:
+  page_width: 120

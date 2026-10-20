@@ -193,8 +193,7 @@ class _Parts {
   /// surface; black or white, whichever reads, on a background the message
   /// sets.
   Color get onBackground => c.backgroundColor == null ? scheme.onSurface : _readableOn(c.backgroundColor!);
-  Color get onBackgroundVariant =>
-      c.backgroundColor == null ? scheme.onSurfaceVariant : onBackground.withAlpha(0xC0);
+  Color get onBackgroundVariant => c.backgroundColor == null ? scheme.onSurfaceVariant : onBackground.withAlpha(0xC0);
 
   static Color _readableOn(Color bg) =>
       ThemeData.estimateBrightnessForColor(bg) == Brightness.dark ? Colors.white : const Color(0xDE000000);
@@ -290,7 +289,8 @@ class _Parts {
         child: label,
       );
     }
-    return TextButton(key: key, style: TextButton.styleFrom(foregroundColor: fg), onPressed: () => onClick(b), child: label);
+    return TextButton(
+        key: key, style: TextButton.styleFrom(foregroundColor: fg), onPressed: () => onClick(b), child: label);
   }
 
   /// One or two buttons side by side, three stacked.
@@ -366,16 +366,18 @@ class _Parts {
           clipBehavior: Clip.antiAlias,
           child: SafeArea(
             top: false,
-            child: _withClose(SingleChildScrollView(
-              child: _tappable(Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (hasImage) image(height: 200) else const SizedBox(height: 16),
-                  texts(),
-                ],
-              )),
-            ), top: 8),
+            child: _withClose(
+                SingleChildScrollView(
+                  child: _tappable(Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (hasImage) image(height: 200) else const SizedBox(height: 16),
+                      texts(),
+                    ],
+                  )),
+                ),
+                top: 8),
           ),
         ),
       );
@@ -393,11 +395,14 @@ class _Parts {
                   child: Center(
                     child: SingleChildScrollView(
                       padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
-                      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                        if (hasTitle) title(style: text.headlineSmall),
-                        if (hasTitle && hasBody) const SizedBox(height: 12),
-                        if (hasBody) body(),
-                      ]),
+                      child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            if (hasTitle) title(style: text.headlineSmall),
+                            if (hasTitle && hasBody) const SizedBox(height: 12),
+                            if (hasBody) body(),
+                          ]),
                     ),
                   ),
                 ),

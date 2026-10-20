@@ -25,7 +25,7 @@ env:
 
 jobs:
   analyze:
-    name: Analyze, docs, publish check
+    name: Analyze, format, docs, publish check
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -35,6 +35,8 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - run: flutter pub get
+      - name: Format
+        run: dart format --output=none --set-exit-if-changed .
       - name: Analyze
         run: flutter analyze
       - name: Analyze example

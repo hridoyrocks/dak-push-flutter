@@ -82,8 +82,8 @@ void main() {
     test('a 4xx that is not from Dak (a proxy page) is retried, not acted on', () async {
       final h = Harness();
       await h.start();
-      h.server.intercept =
-          (method, path, body) => http.Response('<html>403 Forbidden</html>', 403, headers: {'content-type': 'text/html'});
+      h.server.intercept = (method, path, body) =>
+          http.Response('<html>403 Forbidden</html>', 403, headers: {'content-type': 'text/html'});
       await h.client.login('42', authHash: 'abc'); // a network problem: no throw
       expect(h.client.externalId, '42');
 
@@ -103,10 +103,12 @@ void main() {
       final api = DakApi(
         baseUrl: 'https://push.test',
         appId: 'a',
-        client: MockClient((_) async => FakeServer.jsonError(422, {'code': 'invalid', 'field': 'tags', 'message': 'bad'})),
+        client:
+            MockClient((_) async => FakeServer.jsonError(422, {'code': 'invalid', 'field': 'tags', 'message': 'bad'})),
       );
       final e = await refusal(api);
-      expect((e.status, e.code, e.field, e.message, e.fromDak, e.isPermanent), (422, 'invalid', 'tags', 'bad', true, true));
+      expect((e.status, e.code, e.field, e.message, e.fromDak, e.isPermanent),
+          (422, 'invalid', 'tags', 'bad', true, true));
 
       final proxy = DakApi(
         baseUrl: 'https://push.test',

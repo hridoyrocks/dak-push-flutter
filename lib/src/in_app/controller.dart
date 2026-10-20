@@ -392,7 +392,8 @@ class DakInAppController {
     l.last = _now();
     l.session = _sessions;
     if (_local.length > 500) {
-      final oldest = _local.entries.reduce((a, b) => (a.value.last ?? DateTime(0)).isBefore(b.value.last ?? DateTime(0)) ? a : b);
+      final oldest =
+          _local.entries.reduce((a, b) => (a.value.last ?? DateTime(0)).isBefore(b.value.last ?? DateTime(0)) ? a : b);
       _local.remove(oldest.key);
     }
     _queueEvent(m.id, 'impression');
@@ -665,7 +666,10 @@ class DakInAppController {
       // By identity: the list may have changed meanwhile (a reload merged
       // saved events in front).
       final sent = Set<Object>.identity()..addAll(batch);
-      _events = [for (final e in _events) if (!sent.contains(e)) e];
+      _events = [
+        for (final e in _events)
+          if (!sent.contains(e)) e
+      ];
       await _save();
     }
   }

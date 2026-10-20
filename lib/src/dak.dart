@@ -184,16 +184,21 @@ class Dak {
     client.onRegistered.listen((_) => unawaited(inApp.onRegistered()));
     // In-app messages start from the cache as soon as the saved state is
     // read, without waiting for the network.
-    unawaited(client.loaded.then((_) async {
-      if (dir != null) {
-        final legacy = SecureDakStorage(key: _legacyInAppKey);
-        await moveLegacyState(readOld: legacy.read, deleteOld: legacy.delete, to: inAppStore, keep: !client.reinstalled);
-      }
-    }).catchError((Object e) {
-      log?.call('dak: could not move the old in-app cache: $e');
-    }).then((_) => inApp.start()).catchError((Object e) {
-      log?.call('dak: in-app messages did not start: $e');
-    }));
+    unawaited(client.loaded
+        .then((_) async {
+          if (dir != null) {
+            final legacy = SecureDakStorage(key: _legacyInAppKey);
+            await moveLegacyState(
+                readOld: legacy.read, deleteOld: legacy.delete, to: inAppStore, keep: !client.reinstalled);
+          }
+        })
+        .catchError((Object e) {
+          log?.call('dak: could not move the old in-app cache: $e');
+        })
+        .then((_) => inApp.start())
+        .catchError((Object e) {
+          log?.call('dak: in-app messages did not start: $e');
+        }));
     await client.start();
   }
 
@@ -207,8 +212,7 @@ class Dak {
 
   /// Links this device to your user id. With identity verification on (the
   /// default), [authHash] must come from your server.
-  static Future<void> login(String externalId, {String? authHash}) =>
-      _c.login(externalId, authHash: authHash);
+  static Future<void> login(String externalId, {String? authHash}) => _c.login(externalId, authHash: authHash);
 
   /// Unlinks the user from this device and removes its tags, so the next user
   /// of the phone starts without them. Push permission and the subscription

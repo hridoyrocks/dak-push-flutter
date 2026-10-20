@@ -36,6 +36,9 @@ flutter analyze
 flutter test --coverage
 ```
 
+`dart format` reads the page width (120) from analysis_options.yaml from
+Dart 3.7 on; with an older SDK, pass `--line-length 120`.
+
 It also builds the example for Android and iOS, and runs the tests against
 firebase_messaging 15, 16 and 17, the lowest dependency versions, and the
 oldest and newest Flutter.

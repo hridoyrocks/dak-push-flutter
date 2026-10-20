@@ -64,7 +64,9 @@ class FakeServer {
     final id = parts[5];
     final d = devices[id];
     if (d == null || req.headers['Authorization'] != 'Device ${d['secret']}') {
-      return _json(401, {'error': {'code': 'unauthorized', 'message': 'register again'}});
+      return _json(401, {
+        'error': {'code': 'unauthorized', 'message': 'register again'}
+      });
     }
     if (req.method == 'GET' && parts.length == 7 && parts[6] == 'in-app') {
       if (req.headers['If-None-Match'] == inAppEtag) return http.Response('', 304, headers: {'etag': inAppEtag});
@@ -88,7 +90,9 @@ class FakeServer {
       delivered.addAll((body['message_ids'] as List).cast<String>());
       return http.Response('', 204);
     }
-    return _json(404, {'error': {'code': 'not_found', 'message': ''}});
+    return _json(404, {
+      'error': {'code': 'not_found', 'message': ''}
+    });
   });
 
   void _apply(Map<String, dynamic> d, Map<String, dynamic> body) {
@@ -105,7 +109,9 @@ class FakeServer {
   static http.Response _json(int status, Object body, [Map<String, String> extra = const {}]) =>
       http.Response(jsonEncode(body), status, headers: {'content-type': 'application/json', ...extra});
 
-  static http.Response error(int status, String code) => _json(status, {'error': {'code': code, 'message': code}});
+  static http.Response error(int status, String code) => _json(status, {
+        'error': {'code': code, 'message': code}
+      });
 
   static http.Response jsonError(int status, Map<String, Object?> error) => _json(status, {'error': error});
 
@@ -312,7 +318,8 @@ Map<String, dynamic> inAppMessage(
 /// A DakInAppController against [FakeServer], with a device already
 /// registered and a clock the test moves.
 class InAppHarness {
-  InAppHarness({MemoryDakStorage? storage, this.registered = true, this.appState, this.urlSchemes = const {'https', 'http'}})
+  InAppHarness(
+      {MemoryDakStorage? storage, this.registered = true, this.appState, this.urlSchemes = const {'https', 'http'}})
       : storage = storage ?? MemoryDakStorage() {
     server.devices['dev-1'] = {'secret': 's1', 'tags': <String, String>{}};
   }
@@ -359,7 +366,8 @@ class InAppHarness {
   }
 
   List<String> get eventTypes => [
-        for (final e in server.inAppEvents) '${e['type']} ${e['message_id']}${e['button_id'] == null ? '' : ' ${e['button_id']}'}'
+        for (final e in server.inAppEvents)
+          '${e['type']} ${e['message_id']}${e['button_id'] == null ? '' : ' ${e['button_id']}'}'
       ];
 }
 
@@ -457,6 +465,9 @@ class FakeKeychain implements DakKeychain {
   @override
   Future<Iterable<String>> keys() async {
     _check();
-    return [for (final e in items.entries) if (!e.value.legacy) e.key];
+    return [
+      for (final e in items.entries)
+        if (!e.value.legacy) e.key
+    ];
   }
 }

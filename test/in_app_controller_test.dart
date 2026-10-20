@@ -21,7 +21,11 @@ void main() {
   }
 
   test('a session start fetches the list and shows the highest priority message', () async {
-    h.server.inApp = [inAppMessage('low', priority: 1), inAppMessage('high', priority: 5), inAppMessage('also-low', priority: 1)];
+    h.server.inApp = [
+      inAppMessage('low', priority: 1),
+      inAppMessage('high', priority: 5),
+      inAppMessage('also-low', priority: 1)
+    ];
     final c = await h.start();
     expect(h.server.calls, ['GET devices/dev-1/in-app']);
     expect(c.messages.map((m) => m.id), ['high', 'low', 'also-low'], reason: 'ties keep the server order');
@@ -75,10 +79,13 @@ void main() {
   });
 
   group('triggers', () {
-    Future<bool> shows(List<List<Map<String, Object?>>> triggers, {Map<String, Object> set = const {}, int sessions = 1}) async {
+    Future<bool> shows(List<List<Map<String, Object?>>> triggers,
+        {Map<String, Object> set = const {}, int sessions = 1}) async {
       final local = InAppHarness();
       addTearDown(local.controller.dispose);
-      local.server.inApp = [inAppMessage('m', triggers: triggers, frequency: {'type': 'every_session'})];
+      local.server.inApp = [
+        inAppMessage('m', triggers: triggers, frequency: {'type': 'every_session'})
+      ];
       final c = await local.start(attach: false);
       for (var i = 1; i < sessions; i++) {
         c.lifecycle(AppLifecycleState.paused);
@@ -99,33 +106,161 @@ void main() {
         };
 
     test('custom', () async {
-      expect(await shows([[custom('=', 'home')]], set: {'k': 'home'}), isTrue);
-      expect(await shows([[custom('=', 'home')]], set: {'k': 'away'}), isFalse);
-      expect(await shows([[custom('=', 'home')]]), isFalse);
-      expect(await shows([[custom('=', 5)]], set: {'k': '5'}), isTrue, reason: 'numbers compare as numbers');
-      expect(await shows([[custom('=', 5)]], set: {'k': 5.0}), isTrue);
-      expect(await shows([[custom('=', true)]], set: {'k': true}), isTrue);
-      expect(await shows([[custom('!=', 'home')]]), isTrue, reason: 'an unset trigger is not "home"');
-      expect(await shows([[custom('!=', 'home')]], set: {'k': 'home'}), isFalse);
-      expect(await shows([[custom('>', 3)]], set: {'k': 4}), isTrue);
-      expect(await shows([[custom('>', 3)]], set: {'k': '10'}), isTrue);
-      expect(await shows([[custom('<=', 3)]], set: {'k': 4}), isFalse);
-      expect(await shows([[custom('>', 3)]], set: {'k': 'x'}), isFalse);
-      expect(await shows([[custom('in', ['b1', 'b2'])]], set: {'k': 'b2'}), isTrue);
-      expect(await shows([[custom('in', ['1', '2'])]], set: {'k': 2.0}), isTrue);
-      expect(await shows([[custom('in', ['b1'])]], set: {'k': 'c1'}), isFalse);
-      expect(await shows([[custom('exists')]], set: {'k': false}), isTrue);
-      expect(await shows([[custom('exists')]]), isFalse);
-      expect(await shows([[custom('not_exists')]]), isTrue);
+      expect(
+          await shows([
+            [custom('=', 'home')]
+          ], set: {
+            'k': 'home'
+          }),
+          isTrue);
+      expect(
+          await shows([
+            [custom('=', 'home')]
+          ], set: {
+            'k': 'away'
+          }),
+          isFalse);
+      expect(
+          await shows([
+            [custom('=', 'home')]
+          ]),
+          isFalse);
+      expect(
+          await shows([
+            [custom('=', 5)]
+          ], set: {
+            'k': '5'
+          }),
+          isTrue,
+          reason: 'numbers compare as numbers');
+      expect(
+          await shows([
+            [custom('=', 5)]
+          ], set: {
+            'k': 5.0
+          }),
+          isTrue);
+      expect(
+          await shows([
+            [custom('=', true)]
+          ], set: {
+            'k': true
+          }),
+          isTrue);
+      expect(
+          await shows([
+            [custom('!=', 'home')]
+          ]),
+          isTrue,
+          reason: 'an unset trigger is not "home"');
+      expect(
+          await shows([
+            [custom('!=', 'home')]
+          ], set: {
+            'k': 'home'
+          }),
+          isFalse);
+      expect(
+          await shows([
+            [custom('>', 3)]
+          ], set: {
+            'k': 4
+          }),
+          isTrue);
+      expect(
+          await shows([
+            [custom('>', 3)]
+          ], set: {
+            'k': '10'
+          }),
+          isTrue);
+      expect(
+          await shows([
+            [custom('<=', 3)]
+          ], set: {
+            'k': 4
+          }),
+          isFalse);
+      expect(
+          await shows([
+            [custom('>', 3)]
+          ], set: {
+            'k': 'x'
+          }),
+          isFalse);
+      expect(
+          await shows([
+            [
+              custom('in', ['b1', 'b2'])
+            ]
+          ], set: {
+            'k': 'b2'
+          }),
+          isTrue);
+      expect(
+          await shows([
+            [
+              custom('in', ['1', '2'])
+            ]
+          ], set: {
+            'k': 2.0
+          }),
+          isTrue);
+      expect(
+          await shows([
+            [
+              custom('in', ['b1'])
+            ]
+          ], set: {
+            'k': 'c1'
+          }),
+          isFalse);
+      expect(
+          await shows([
+            [custom('exists')]
+          ], set: {
+            'k': false
+          }),
+          isTrue);
+      expect(
+          await shows([
+            [custom('exists')]
+          ]),
+          isFalse);
+      expect(
+          await shows([
+            [custom('not_exists')]
+          ]),
+          isTrue);
     });
 
     test('groups: OR between groups, AND inside', () async {
       final a = {'kind': 'custom', 'key': 'a', 'op': 'exists'};
       final b = {'kind': 'custom', 'key': 'b', 'op': 'exists'};
       final c = {'kind': 'custom', 'key': 'c', 'op': 'exists'};
-      expect(await shows([[a, b]], set: {'a': 1}), isFalse);
-      expect(await shows([[a, b]], set: {'a': 1, 'b': 1}), isTrue);
-      expect(await shows([[a, b], [c]], set: {'c': 1}), isTrue);
+      expect(
+          await shows([
+            [a, b]
+          ], set: {
+            'a': 1
+          }),
+          isFalse);
+      expect(
+          await shows([
+            [a, b]
+          ], set: {
+            'a': 1,
+            'b': 1
+          }),
+          isTrue);
+      expect(
+          await shows([
+            [a, b],
+            [c]
+          ], set: {
+            'c': 1
+          }),
+          isTrue);
     });
 
     test('session count', () async {
@@ -136,15 +271,21 @@ void main() {
       ];
       expect(await shows(third, sessions: 2), isFalse);
       expect(await shows(third, sessions: 3), isTrue);
-      expect(await shows([
-        [
-          {'kind': 'session_count', 'op': '=', 'value': 1}
-        ]
-      ]), isTrue);
+      expect(
+          await shows([
+            [
+              {'kind': 'session_count', 'op': '=', 'value': 1}
+            ]
+          ]),
+          isTrue);
     });
 
     test('triggers are checked when they change, and validated', () async {
-      h.server.inApp = [inAppMessage('m', triggers: [[custom('not_exists')]])];
+      h.server.inApp = [
+        inAppMessage('m', triggers: [
+          [custom('not_exists')]
+        ])
+      ];
       final c = await h.start(attach: false);
       c.addTriggers({'k': 1});
       c.attach();
@@ -252,9 +393,15 @@ void main() {
   test("the server's counts are merged with the phone's", () async {
     h.server.inApp = [
       inAppMessage('seen-once', shown: 1),
-      inAppMessage('recent', frequency: {'type': 'interval', 'interval_seconds': 3600}, shown: 1, lastShownAt: h.now.subtract(const Duration(minutes: 10)).toUtc().toIso8601String()),
+      inAppMessage('recent',
+          frequency: {'type': 'interval', 'interval_seconds': 3600},
+          shown: 1,
+          lastShownAt: h.now.subtract(const Duration(minutes: 10)).toUtc().toIso8601String()),
       inAppMessage('maxed', frequency: {'type': 'every_session', 'max_displays': 3}, shown: 3),
-      inAppMessage('ok', frequency: {'type': 'interval', 'interval_seconds': 3600}, shown: 4, lastShownAt: h.now.subtract(const Duration(hours: 2)).toUtc().toIso8601String()),
+      inAppMessage('ok',
+          frequency: {'type': 'interval', 'interval_seconds': 3600},
+          shown: 4,
+          lastShownAt: h.now.subtract(const Duration(hours: 2)).toUtc().toIso8601String()),
     ];
     await h.start();
     expect(h.showing, 'ok');
@@ -264,7 +411,8 @@ void main() {
     final soon = h.now.add(const Duration(hours: 1));
     h.server.inApp = [
       inAppMessage('ended', endAt: h.now.subtract(const Duration(minutes: 1)).toUtc().toIso8601String()),
-      inAppMessage('later', startAt: soon.toUtc().toIso8601String(), endAt: soon.add(const Duration(hours: 1)).toUtc().toIso8601String()),
+      inAppMessage('later',
+          startAt: soon.toUtc().toIso8601String(), endAt: soon.add(const Duration(hours: 1)).toUtc().toIso8601String()),
     ];
     final c = await h.start();
     expect(h.showing, isNull);
@@ -302,14 +450,37 @@ void main() {
 
   test('clicks: report, close, run the action, tell the app', () async {
     final buttons = [
-      {'id': 'go', 'text': 'Go', 'action': {'type': 'deep_link', 'url': 'example://challenge'}},
-      {'id': 'web', 'text': 'Web', 'action': {'type': 'url', 'url': 'https://example.com/x'}},
-      {'id': 'b2', 'text': 'B2', 'action': {'type': 'tags', 'tags': {'level': 'b2', 'old': ''}}},
+      {
+        'id': 'go',
+        'text': 'Go',
+        'action': {'type': 'deep_link', 'url': 'example://challenge'}
+      },
+      {
+        'id': 'web',
+        'text': 'Web',
+        'action': {'type': 'url', 'url': 'https://example.com/x'}
+      },
+      {
+        'id': 'b2',
+        'text': 'B2',
+        'action': {
+          'type': 'tags',
+          'tags': {'level': 'b2', 'old': ''}
+        }
+      },
     ];
     h.server.inApp = [
       for (final b in buttons)
-        inAppMessage('m-${b['id']}', content: {'title': 'T', 'buttons': [b]}, frequency: {'type': 'every_session'}),
-      inAppMessage('tap', content: {'title': 'T', 'click_action': {'type': 'custom'}}),
+        inAppMessage('m-${b['id']}', content: {
+          'title': 'T',
+          'buttons': [b]
+        }, frequency: {
+          'type': 'every_session'
+        }),
+      inAppMessage('tap', content: {
+        'title': 'T',
+        'click_action': {'type': 'custom'}
+      }),
       inAppMessage('no-action', content: {'title': 'T'}),
     ];
     final c = await h.start();
@@ -346,11 +517,16 @@ void main() {
 
     await c.flushEvents();
     expect(h.eventTypes, [
-      'impression m-go', 'click m-go go',
-      'impression m-web', 'click m-web web',
-      'impression m-b2', 'click m-b2 b2',
-      'impression tap', 'click tap',
-      'impression no-action', 'dismiss no-action',
+      'impression m-go',
+      'click m-go go',
+      'impression m-web',
+      'click m-web web',
+      'impression m-b2',
+      'click m-b2 b2',
+      'impression tap',
+      'click tap',
+      'impression no-action',
+      'dismiss no-action',
     ]);
     final seqs = [for (final e in h.server.inAppEvents) e['seq'] as int];
     expect(seqs, List.of(seqs)..sort());
@@ -358,7 +534,9 @@ void main() {
   });
 
   test('offline: the cached list is used and events wait', () async {
-    h.server.inApp = [inAppMessage('a', frequency: {'type': 'every_session'})];
+    h.server.inApp = [
+      inAppMessage('a', frequency: {'type': 'every_session'})
+    ];
     await h.start();
     h.display();
 
@@ -400,7 +578,11 @@ void main() {
       inAppMessage('new-action', priority: 9, content: {
         'title': 'T',
         'buttons': [
-          {'id': 'x', 'text': 'X', 'action': {'type': 'share'}}
+          {
+            'id': 'x',
+            'text': 'X',
+            'action': {'type': 'share'}
+          }
         ]
       }),
       inAppMessage('new-trigger', priority: 9, triggers: [
@@ -428,7 +610,10 @@ void main() {
   });
 
   test('a message the host cannot draw is skipped for the session', () async {
-    h.server.inApp = [inAppMessage('image-only', priority: 2, content: {'image_url': 'https://x/a.png'}), inAppMessage('text')];
+    h.server.inApp = [
+      inAppMessage('image-only', priority: 2, content: {'image_url': 'https://x/a.png'}),
+      inAppMessage('text')
+    ];
     final c = await h.start();
     expect(h.showing, 'image-only');
     c.didFail(c.current.value!);
@@ -441,7 +626,9 @@ void main() {
   });
 
   test('events: permanent refusals are dropped, other failures kept', () async {
-    h.server.inApp = [inAppMessage('a', frequency: {'type': 'every_session'})];
+    h.server.inApp = [
+      inAppMessage('a', frequency: {'type': 'every_session'})
+    ];
     final c = await h.start();
     h.display();
     h.server.intercept = (method, path, body) => path.endsWith('/events') ? FakeServer.error(503, 'down') : null;
@@ -469,7 +656,9 @@ void main() {
 
   group('robustness', () {
     test('I9: a cache not refreshed for a week is not shown', () async {
-      h.server.inApp = [inAppMessage('a', frequency: {'type': 'every_session'})];
+      h.server.inApp = [
+        inAppMessage('a', frequency: {'type': 'every_session'})
+      ];
       await h.start();
       h.display();
 
@@ -480,14 +669,15 @@ void main() {
       expect(later.showing, isNull, reason: 'the server may have stopped it since');
 
       later.server.offline = false;
-      later.server.inApp = [inAppMessage('a', frequency: {'type': 'every_session'})];
+      later.server.inApp = [
+        inAppMessage('a', frequency: {'type': 'every_session'})
+      ];
       await c.refresh(force: true);
       c.check();
       expect(later.showing, 'a');
     });
 
-    test('I11: hosts are counted; the first one draws, and the message moves on without a new impression',
-        () async {
+    test('I11: hosts are counted; the first one draws, and the message moves on without a new impression', () async {
       h.server.inApp = [inAppMessage('a')];
       final c = await h.start(attach: false);
       final outer = Object();
@@ -523,7 +713,9 @@ void main() {
           inAppMessage(id, content: {
             'title': id,
             'click_action': {'type': 'url', 'url': url},
-          }, frequency: const {'type': 'every_session'}),
+          }, frequency: const {
+            'type': 'every_session'
+          }),
       ];
       final c = await strict.start();
       for (var i = 0; i < 5; i++) {
@@ -591,7 +783,8 @@ void main() {
     });
   });
 
-  test('a saved state that cannot be read is not overwritten; the next resume reads it and keeps what happened', () async {
+  test('a saved state that cannot be read is not overwritten; the next resume reads it and keeps what happened',
+      () async {
     final storage = LockableStorage();
     final first = InAppHarness(storage: storage);
     addTearDown(first.controller.dispose);
@@ -604,7 +797,9 @@ void main() {
     storage.locked = true;
     final second = InAppHarness(storage: storage);
     addTearDown(second.controller.dispose);
-    second.server.inApp = [inAppMessage('b', frequency: {'type': 'every_session'})];
+    second.server.inApp = [
+      inAppMessage('b', frequency: {'type': 'every_session'})
+    ];
     final c = await second.start();
     expect(second.showing, 'b', reason: 'runs from memory meanwhile');
     second.display();
@@ -626,7 +821,9 @@ void main() {
   });
 
   test('events queued while a batch is on its way are kept', () async {
-    h.server.inApp = [inAppMessage('a', frequency: {'type': 'every_session'})];
+    h.server.inApp = [
+      inAppMessage('a', frequency: {'type': 'every_session'})
+    ];
     final c = await h.start();
     h.display();
     h.server.hold = Completer();
@@ -650,7 +847,12 @@ void main() {
       inAppMessage('bad-button', priority: 9, content: {
         'title': 'T',
         'buttons': [
-          {'id': 'x', 'text': 'X', 'action': {'type': 'dismiss'}, 'background_color': 7}
+          {
+            'id': 'x',
+            'text': 'X',
+            'action': {'type': 'dismiss'},
+            'background_color': 7
+          }
         ]
       }),
       inAppMessage('fine'),

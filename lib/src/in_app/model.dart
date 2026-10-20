@@ -70,7 +70,8 @@ class DakInAppAction {
 /// A button on an in-app message.
 class DakInAppButton {
   /// Creates a button.
-  const DakInAppButton({required this.id, required this.text, required this.action, this.backgroundColor, this.textColor});
+  const DakInAppButton(
+      {required this.id, required this.text, required this.action, this.backgroundColor, this.textColor});
 
   /// The click id: reported in `Dak.onInAppClick` and counted in the stats.
   final String id;

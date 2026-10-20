@@ -37,8 +37,7 @@ class DakApiException implements Exception {
   bool get isUnauthorized => fromDak && status == 401;
 
   /// Retrying the same request cannot succeed (bad input, identity check).
-  bool get isPermanent =>
-      fromDak && status >= 400 && status < 500 && status != 401 && status != 408 && status != 429;
+  bool get isPermanent => fromDak && status >= 400 && status < 500 && status != 401 && status != 408 && status != 429;
 
   @override
   String toString() => 'DakApiException($status $code: $message)';
@@ -120,10 +119,14 @@ class DakApi {
 
   /// A tap on a notification, or on its button [actionId].
   Future<void> opened(String deviceId, String secret, String messageId, {String? actionId}) async {
-    await _send('POST', _uri('/devices/$deviceId/opened'), {
-      'message_id': messageId,
-      if (actionId != null) 'action_id': actionId,
-    }, secret);
+    await _send(
+        'POST',
+        _uri('/devices/$deviceId/opened'),
+        {
+          'message_id': messageId,
+          if (actionId != null) 'action_id': actionId,
+        },
+        secret);
   }
 
   /// Receipts: these messages arrived on the device (at most 50).
@@ -187,7 +190,8 @@ class DakApi {
     }
     final body = BytesBuilder(copy: false);
     final done = Completer<void>();
-    final sub = streamed.stream.listen(body.add, onError: done.completeError, onDone: done.complete, cancelOnError: true);
+    final sub =
+        streamed.stream.listen(body.add, onError: done.completeError, onDone: done.complete, cancelOnError: true);
     final left = timeout - clock.elapsed;
     try {
       await done.future.timeout(left.isNegative ? Duration.zero : left);

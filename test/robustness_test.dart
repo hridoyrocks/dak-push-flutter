@@ -183,8 +183,8 @@ void main() {
       final h = Harness();
       await h.start();
       h.server.requests.clear();
-      h.server.intercept = (method, path, body) =>
-          path.endsWith('/opened') ? FakeServer.error(401, 'unauthorized') : null;
+      h.server.intercept =
+          (method, path, body) => path.endsWith('/opened') ? FakeServer.error(401, 'unauthorized') : null;
       h.messaging.opened.add(DakNotification.fromData({'_dak_id': 'm1'}));
       await settle();
       expect(h.server.calls.where((c) => c == 'POST devices'), hasLength(1));
@@ -241,8 +241,8 @@ void main() {
       final c = client(h, math.Random(1));
       await c.start();
       await c.firstSync;
-      h.server.intercept = (_, __, ___) => http.Response('{"error":{"code":"rate_limited","message":""}}', 429,
-          headers: {'retry-after': '120'});
+      h.server.intercept = (_, __, ___) =>
+          http.Response('{"error":{"code":"rate_limited","message":""}}', 429, headers: {'retry-after': '120'});
       await c.setTags({'a': '1'});
       h.server.intercept = null;
       final before = h.server.requests.length;
