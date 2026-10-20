@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:dak_push/dak_push.dart' show MemoryDakStorage;
 import 'package:flutter/widgets.dart' show AppLifecycleState;
 import 'package:flutter_test/flutter_test.dart';
@@ -552,6 +555,113 @@ void main() {
       next.controller.check();
       expect(next.showing, isNull);
     });
+  });
+
+  group('only in the foreground', () {
+    test('a launch in the background counts no session and shows nothing until the app is opened', () async {
+      var state = AppLifecycleState.hidden;
+      final bg = InAppHarness(appState: () => state);
+      addTearDown(bg.controller.dispose);
+      bg.server.inApp = [inAppMessage('a')];
+      final c = await bg.start();
+      expect(c.sessionCount, 0);
+      expect(bg.showing, isNull);
+
+      state = AppLifecycleState.resumed;
+      c.lifecycle(AppLifecycleState.resumed);
+      await settle();
+      expect(c.sessionCount, 1);
+      expect(bg.showing, 'a');
+    });
+
+    test('a message that comes due in the background waits for the foreground', () async {
+      h.server.inApp = [
+        inAppMessage('cart', triggers: [
+          [
+            {'kind': 'custom', 'key': 'screen', 'op': '=', 'value': 'cart'}
+          ]
+        ]),
+      ];
+      final c = await h.start();
+      c.lifecycle(AppLifecycleState.paused);
+      c.addTriggers({'screen': 'cart'});
+      expect(h.showing, isNull);
+      c.lifecycle(AppLifecycleState.resumed);
+      expect(h.showing, 'cart');
+    });
+  });
+
+  test('a saved state that cannot be read is not overwritten; the next resume reads it and keeps what happened', () async {
+    final storage = LockableStorage();
+    final first = InAppHarness(storage: storage);
+    addTearDown(first.controller.dispose);
+    first.server.inApp = [inAppMessage('a')];
+    await first.start();
+    first.display(); // its impression is saved, not sent yet
+    await settle();
+    final saved = storage.value;
+
+    storage.locked = true;
+    final second = InAppHarness(storage: storage);
+    addTearDown(second.controller.dispose);
+    second.server.inApp = [inAppMessage('b', frequency: {'type': 'every_session'})];
+    final c = await second.start();
+    expect(second.showing, 'b', reason: 'runs from memory meanwhile');
+    second.display();
+    await settle();
+    expect(storage.value, saved, reason: 'never saved over');
+
+    storage.locked = false;
+    c.lifecycle(AppLifecycleState.resumed);
+    await settle();
+    final js = jsonDecode(storage.value!) as Map<String, dynamic>;
+    expect(js['sessions'], 2);
+    expect((js['local'] as Map).keys, unorderedEquals(['a', 'b']));
+    expect([for (final e in js['events'] as List) '${e['type']} ${e['message_id']}'], ['impression a', 'impression b']);
+
+    await c.flushEvents();
+    expect(second.eventTypes, ['impression a', 'impression b']);
+    expect(c.pendingEvents, 0);
+  });
+
+  test('events queued while a batch is on its way are kept', () async {
+    h.server.inApp = [inAppMessage('a', frequency: {'type': 'every_session'})];
+    final c = await h.start();
+    h.display();
+    h.server.hold = Completer();
+    final sending = c.flushEvents();
+    await settle();
+    c.dismiss(c.current.value!); // queued while the impression is being sent
+    h.server.hold!.complete();
+    await sending;
+    expect(h.eventTypes, ['impression a', 'dismiss a']);
+    expect(c.pendingEvents, 0);
+  });
+
+  test('a message with a field of the wrong type is skipped alone, also from the cache', () async {
+    h.server.inApp = [
+      inAppMessage('bad-title', priority: 9, content: {'title': 5}),
+      {...inAppMessage('bad-priority'), 'priority': 'high'},
+      inAppMessage('bad-url', priority: 9, content: {
+        'title': 'T',
+        'click_action': {'type': 'url', 'url': 42}
+      }),
+      inAppMessage('bad-button', priority: 9, content: {
+        'title': 'T',
+        'buttons': [
+          {'id': 'x', 'text': 'X', 'action': {'type': 'dismiss'}, 'background_color': 7}
+        ]
+      }),
+      inAppMessage('fine'),
+    ];
+    final c = await h.start();
+    expect(c.messages.map((m) => m.id), ['bad-button', 'fine'], reason: 'a bad colour is only left out');
+    expect(h.showing, 'bad-button');
+
+    final again = InAppHarness(storage: h.storage, registered: false);
+    addTearDown(again.controller.dispose);
+    final cold = await again.start();
+    expect(cold.messages.map((m) => m.id), ['bad-button', 'fine']);
   });
 }
 

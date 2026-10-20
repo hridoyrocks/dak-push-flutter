@@ -128,7 +128,12 @@ class _DakInAppHostState extends State<DakInAppHost> {
       }
     }
     _show(show);
-    c.didDisplay(m);
+    // Counted once a frame shows it; an app in the background draws none.
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (mounted && identical(_c, c) && token == _token && c.current.value?.id == m.id && identical(c.activeHost.value, this)) {
+        c.didDisplay(m);
+      }
+    });
   }
 
   void _show(DakInAppMessage? m) {

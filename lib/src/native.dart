@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 
+import 'buffered_broadcast.dart';
 import 'notification.dart';
 
 /// The SDK's own native code: Android notifications with buttons, the
@@ -10,7 +11,8 @@ abstract class DakNative {
   /// Android: the SDK-shown notification that launched the app, if any.
   Future<DakNotification?> initialAction();
 
-  /// Android: taps on notifications the SDK showed (body or button).
+  /// Android: taps on notifications the SDK showed (body or button). Taps
+  /// that come while nobody listens are kept for the next listener.
   Stream<DakNotification> get onAction;
 
   /// iOS with firebase_messaging 15/16: the button tapped for a message, if
@@ -50,7 +52,7 @@ class MethodChannelDakNative implements DakNative {
   }
 
   static const _channel = MethodChannel('dak_push');
-  final _actions = StreamController<DakNotification>.broadcast();
+  final _actions = BufferedBroadcast<DakNotification>();
 
   static DakNotification? _decode(Object? args) {
     if (args is! Map) return null;

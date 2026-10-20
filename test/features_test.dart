@@ -26,6 +26,13 @@ class Messaging17 {
   }
 }
 
+/// FirebaseMessaging 17 whose register() fails (no APNs token yet).
+class FailingMessaging17 {
+  final registered = StreamController<String>.broadcast();
+  Stream<String> get onRegistered => registered.stream;
+  Future<void> register() async => throw Exception('APNs token not set');
+}
+
 /// Looks like FirebaseMessaging 15/16: no register().
 class Messaging15 {
   Future<String?> getToken() async => 'token-15';
@@ -57,6 +64,18 @@ void main() {
       expect(await registerFid(fm, timeout: const Duration(milliseconds: 50)), isNull);
     });
 
+    test('a register() that throws leaves no stray TimeoutException behind', () async {
+      final uncaught = <Object>[];
+      await runZonedGuarded(() async {
+        await expectLater(
+          registerFid(FailingMessaging17(), timeout: const Duration(milliseconds: 20)),
+          throwsA(isA<Exception>()),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 60)); // past the timeout
+      }, (e, _) => uncaught.add(e));
+      expect(uncaught, isEmpty);
+    });
+
     test('the action identifier is read only where it exists', () {
       expect(actionIdentifierOf(Message17('accept')), 'accept');
       expect(actionIdentifierOf(Message17('com.apple.UNNotificationDefaultActionIdentifier')), isNull);
@@ -68,7 +87,7 @@ void main() {
       final h = Harness();
       h.messaging.tokenType = 'fid';
       h.messaging.token = 'fid-1';
-      await h.client.start();
+      await h.start();
       expect(h.server.requests.single.body['token_type'], 'fid');
 
       h.messaging.tokenType = 'token';
@@ -81,7 +100,7 @@ void main() {
   group('delivered receipts', () {
     test('foreground messages are reported, once, in batches', () async {
       final h = Harness();
-      await h.client.start();
+      await h.start();
       h.messaging.foreground.add(DakNotification.fromData({'_dak_id': 'm1'}));
       h.messaging.foreground.add(DakNotification.fromData({'_dak_id': 'm1'}));
       h.messaging.foreground.add(DakNotification.fromData({'not_dak': '1'}));
@@ -91,7 +110,7 @@ void main() {
 
     test('receipts made offline are sent later', () async {
       final h = Harness();
-      await h.client.start();
+      await h.start();
       h.server.offline = true;
       h.messaging.foreground.add(DakNotification.fromData({'_dak_id': 'm1'}));
       await settle();
@@ -102,7 +121,7 @@ void main() {
 
     test('the background handler reports with the saved device secret', () async {
       final h = Harness();
-      await h.client.start();
+      await h.start();
       final sent = <http.Request>[];
       final client = MockClient((req) async {
         sent.add(req);
@@ -121,7 +140,7 @@ void main() {
 
     test('without network the background handler keeps receipts for the app', () async {
       final h = Harness();
-      await h.client.start();
+      await h.start();
       final offline = MockClient((_) async => throw http.ClientException('no network'));
       await reportDelivery({'_dak_id': 'b1'}, storage: h.storage, client: offline);
       await reportDelivery({'_dak_id': 'b2'}, storage: h.storage, client: offline);
@@ -138,13 +157,13 @@ void main() {
       await reportDelivery({'_dak_id': 'early'}, storage: storage, client: MockClient((_) async => http.Response('', 204)));
       expect(storage.receipts, ['early']);
       final h = Harness(storage: storage);
-      await h.client.start();
+      await h.start();
       expect(h.server.delivered, ['early']);
     });
 
     test('a refused receipt is not kept', () async {
       final h = Harness();
-      await h.client.start();
+      await h.start();
       final refuse = MockClient((_) async => http.Response('{"error":{"code":"invalid","message":"x"}}', 422));
       await reportDelivery({'_dak_id': 'x1'}, storage: h.storage, client: refuse);
       expect(h.storage.receipts, isEmpty);
@@ -180,7 +199,7 @@ void main() {
     test('Android: taps on SDK-shown notifications report the button', () async {
       final h = Harness();
       h.native.initial = DakNotification.fromData({'_dak_id': 'm0', '_dak_buttons': buttons}, actionId: 'accept');
-      await h.client.start();
+      await h.start();
       await settle();
       expect(h.client.initialNotification!.url, 'app://accept');
 
@@ -196,7 +215,7 @@ void main() {
 
     test('iOS with firebase_messaging 15/16: the plugin knows the button', () async {
       final h = Harness();
-      await h.client.start();
+      await h.start();
       h.native.iosActions['m1'] = 'accept';
       final seen = <DakNotification>[];
       h.client.onOpened.listen(seen.add);
@@ -211,13 +230,13 @@ void main() {
   group('UTC offset', () {
     test('is sent only when the app opts in, and again when it changes', () async {
       final off = Harness();
-      await off.client.start();
+      await off.start();
       // Sent as null, so a row this install takes over loses an old offset.
       expect(off.server.requests.single.body['utc_offset_minutes'], isNull);
       expect(off.server.requests.single.body.containsKey('utc_offset_minutes'), isTrue);
 
       final h = Harness(shareTimezoneOffset: true);
-      await h.client.start();
+      await h.start();
       expect(h.server.requests.single.body['utc_offset_minutes'], 360);
       h.platform.offset = 330; // travelled to India
       await h.client.onResume();
@@ -227,10 +246,10 @@ void main() {
     test('turning it off clears it on the server', () async {
       final storage = MemoryDakStorage();
       final first = Harness(storage: storage, shareTimezoneOffset: true);
-      await first.client.start();
+      await first.start();
       final second = Harness(storage: storage);
       second.server.devices.addAll(first.server.devices);
-      await second.client.start();
+      await second.start();
       expect(second.server.requests.single.body, {'utc_offset_minutes': null});
     });
   });
@@ -238,7 +257,7 @@ void main() {
   group('iOS extension and badge', () {
     test('the extension gets the receipt token, never the secret', () async {
       final h = Harness(iosAppGroup: 'group.app');
-      await h.client.start();
+      await h.start();
       final shared = h.native.shared.single;
       final secret = h.server.devices['dev-1']!['secret'] as String;
       expect(shared.group, 'group.app');
@@ -256,13 +275,13 @@ void main() {
 
     test('without an App Group nothing is shared', () async {
       final h = Harness();
-      await h.client.start();
+      await h.start();
       expect(h.native.shared, isEmpty);
     });
 
     test('setBadge goes to the plugin with the App Group', () async {
       final h = Harness(iosAppGroup: 'group.app');
-      await h.client.start();
+      await h.start();
       await h.client.setBadge(-3);
       expect(h.native.badge, 0);
       await h.client.setBadge(4);
@@ -286,7 +305,7 @@ void main() {
       });
     final h = Harness(storage: storage);
     h.server.devices['dev-1'] = {'secret': 'secret-2', 'tags': <String, String>{}, 'token': 'fcm-token-1'};
-    await h.client.start();
+    await h.start();
     expect(h.server.opened, ['old-open']);
     final patch = h.server.requests.first.body;
     expect(patch.containsKey('token'), isFalse, reason: 'an unchanged token keeps its (default) type');

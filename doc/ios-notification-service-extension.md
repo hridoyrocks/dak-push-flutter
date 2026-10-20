@@ -105,8 +105,8 @@ the extension logs an error when the app is newer.
 ## Notes
 
 - The extension has about 30 seconds per push. It reports the delivery and
-  downloads the image at the same time; if time runs out, iOS shows the push
-  as it came.
+  downloads the image at the same time. The download stops after 15 seconds
+  or 10 MB, and the push then shows without the picture.
 - Buttons are made as categories named `dak_…`. The extension keeps the app's
   own categories and the 30 of Dak's used most recently, one push at a time, and
   shows the push once iOS has its category. If another plugin replaces all

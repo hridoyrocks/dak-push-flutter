@@ -52,7 +52,7 @@ void main() {
         'external_id': 'user-a',
         'tags': <String, String>{'plan': 'premium'},
       };
-      await h.client.start();
+      await h.start();
       expect(h.client.deviceId, 'old', reason: 'the server hands over the row for this token');
       expect(h.server.devices['old']!['external_id'], isNull);
       expect(h.server.devices['old']!['tags'], isEmpty);
@@ -61,7 +61,7 @@ void main() {
     test('a logged-in registration sends the user with its hash', () async {
       final h = Harness();
       h.messaging.token = null;
-      await h.client.start();
+      await h.start();
       await h.client.login('42', authHash: 'h42');
       h.messaging.tokenRefresh.add('fcm-late');
       await settle();
@@ -75,7 +75,7 @@ void main() {
     test('a first start marks the install and saves its id', () async {
       final marker = MemoryStateStore();
       final h = Harness(installMarker: marker);
-      await h.client.start();
+      await h.start();
       expect(marker.value, hasLength(32));
       expect(jsonDecode(h.storage.value!)['install'], marker.value);
       expect(h.client.reinstalled, isFalse);
@@ -85,11 +85,11 @@ void main() {
       final storage = MemoryDakStorage();
       final marker = MemoryStateStore();
       final first = Harness(storage: storage, installMarker: marker);
-      await first.client.start();
+      await first.start();
       await first.client.login('7');
       final second = Harness(storage: storage, installMarker: marker);
       second.server.devices.addAll(first.server.devices);
-      await second.client.start();
+      await second.start();
       expect(second.client.reinstalled, isFalse);
       expect(second.client.externalId, '7');
       expect(second.server.calls, isEmpty);
@@ -98,7 +98,7 @@ void main() {
     test('keychain state left by an uninstalled app is dropped (iOS)', () async {
       final storage = MemoryDakStorage();
       final first = Harness(storage: storage, installMarker: MemoryStateStore());
-      await first.client.start();
+      await first.start();
       await first.client.login('old-user');
       await first.client.setTags({'plan': 'premium'});
       await storage.addReceipt('old-receipt');
@@ -107,7 +107,7 @@ void main() {
       final marker = MemoryStateStore();
       final second = Harness(storage: storage, installMarker: marker);
       second.server.devices.addAll(first.server.devices);
-      await second.client.start();
+      await second.start();
       expect(second.client.reinstalled, isTrue);
       expect(second.client.externalId, isNull);
       expect(second.client.tags, isEmpty);
@@ -121,14 +121,14 @@ void main() {
     test('state from SDK 0.3 (no install id) is kept and marked', () async {
       final storage = MemoryDakStorage();
       final old = Harness(storage: storage);
-      await old.client.start();
+      await old.start();
       await old.client.login('7');
       expect(jsonDecode(storage.value!).containsKey('install'), isFalse);
 
       final marker = MemoryStateStore();
       final upgraded = Harness(storage: storage, installMarker: marker);
       upgraded.server.devices.addAll(old.server.devices);
-      await upgraded.client.start();
+      await upgraded.start();
       expect(upgraded.client.reinstalled, isFalse);
       expect(upgraded.client.externalId, '7');
       expect(marker.value, isNotNull);
@@ -139,7 +139,7 @@ void main() {
   group('D9 lengths in UTF-8 bytes', () {
     test('tag values and user ids are limited by bytes, as the server counts', () async {
       final h = Harness();
-      await h.client.start();
+      await h.start();
       final bangla85 = 'ক' * 85; // 255 bytes
       await h.client.setTags({'name': bangla85});
       expect(h.server.devices['dev-1']!['tags'], {'name': bangla85});
@@ -151,7 +151,7 @@ void main() {
     test('app and OS versions are cut to 32 bytes', () async {
       final h = Harness();
       h.platform.version = '8.0.2+533-${'x' * 40}';
-      await h.client.start();
+      await h.start();
       expect(h.server.requests.single.body['app_version'], hasLength(32));
       expect(clampUtf8('৮.০.২', 5), '৮.', reason: 'never inside a character');
       expect(clampUtf8('short', 32), 'short');
@@ -161,7 +161,7 @@ void main() {
   group('D10 a 401 on opens and receipts registers again', () {
     test('the open is kept and sent for the new registration', () async {
       final h = Harness();
-      await h.client.start();
+      await h.start();
       h.server.requests.clear();
       h.server.devices.clear(); // the server deleted the device
       h.messaging.opened.add(DakNotification.fromData({'_dak_id': 'm1'}));
@@ -172,7 +172,7 @@ void main() {
 
     test('receipts too', () async {
       final h = Harness();
-      await h.client.start();
+      await h.start();
       h.server.devices.clear();
       h.messaging.foreground.add(DakNotification.fromData({'_dak_id': 'm2'}));
       await settle();
@@ -181,7 +181,7 @@ void main() {
 
     test('a server that keeps refusing cannot make it loop', () async {
       final h = Harness();
-      await h.client.start();
+      await h.start();
       h.server.requests.clear();
       h.server.intercept = (method, path, body) =>
           path.endsWith('/opened') ? FakeServer.error(401, 'unauthorized') : null;
@@ -240,6 +240,7 @@ void main() {
       final h = Harness();
       final c = client(h, math.Random(1));
       await c.start();
+      await c.firstSync;
       h.server.intercept = (_, __, ___) => http.Response('{"error":{"code":"rate_limited","message":""}}', 429,
           headers: {'retry-after': '120'});
       await c.setTags({'a': '1'});
@@ -285,7 +286,7 @@ void main() {
       await runZonedGuarded(() async {
         final storage = FlakyStorage();
         final h = Harness(storage: storage);
-        await h.client.start();
+        await h.start();
         storage.fail = true;
         await h.client.login('1');
         h.messaging.opened.add(DakNotification.fromData({'_dak_id': 'm1'}));
@@ -308,6 +309,7 @@ void main() {
       );
       h.server.offline = true;
       await c.start();
+      await c.firstSync;
       await c.dispose();
       final before = h.server.requests.length;
       h.server.offline = false;
@@ -331,6 +333,7 @@ void main() {
       );
       h.messaging.initial = DakNotification.fromData({'_dak_id': 'm1'});
       await c.start();
+      await c.firstSync;
       expect(h.warnings.single, contains('App Group group.wrong is not set up'));
       expect(h.server.opened, ['m1']);
     });
@@ -339,7 +342,7 @@ void main() {
   group('D14', () {
     test('logout removes the tags too', () async {
       final h = Harness();
-      await h.client.start();
+      await h.start();
       await h.client.login('1');
       await h.client.setTags({'plan': 'premium', 'level': 'b2'});
       await h.client.logout();
@@ -364,7 +367,7 @@ void main() {
       final storage = RacingStorage();
       await storage.addReceipt('early');
       final h = Harness(storage: storage);
-      await h.client.start();
+      await h.start();
       expect(h.server.delivered, ['early']);
       expect(storage.receipts, ['late']);
       await h.client.onResume();
@@ -376,7 +379,7 @@ void main() {
   group('N2 receipts the iOS extension could not send', () {
     test('are taken from the App Group on resume, and removed there once saved', () async {
       final h = Harness(iosAppGroup: 'group.app');
-      await h.client.start();
+      await h.start();
       h.native.extensionKept['group.app'] = ['e1', 'e2'];
       await h.client.onResume();
       expect(h.server.delivered, ['e1', 'e2']);

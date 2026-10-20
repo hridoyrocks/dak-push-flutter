@@ -4,7 +4,6 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'api.dart';
@@ -110,10 +109,15 @@ class Dak {
     return c;
   }
 
-  /// Starts the SDK: gets the push token and registers the device. Safe to
-  /// call more than once (later calls wait for the first). Initializes
-  /// Firebase if the app has not. Call it before runApp, so the back button
-  /// closes in-app messages first. [baseUrl] must be https.
+  /// Starts the SDK. Safe to call more than once (later calls wait for the
+  /// first). Initializes Firebase if the app has not. Call it before runApp,
+  /// so the back button closes in-app messages first. [baseUrl] must be
+  /// https.
+  ///
+  /// It returns once the saved state and the notification that opened the
+  /// app are read; getting the push token and registering the device go on
+  /// in the background, so a slow network never holds the splash screen.
+  /// Calls like [login] made meanwhile wait for the saved state, then sync.
   static Future<void> init({
     required String appId,
     required String baseUrl,
@@ -142,7 +146,6 @@ class Dak {
     } catch (e) {
       log?.call('dak: no folder for the SDK: $e');
     }
-    const secure = FlutterSecureStorage();
     final client = DakClient(
       api: api,
       messaging: messaging,
@@ -158,7 +161,7 @@ class Dak {
     // The in-app cache holds nothing secret and changes with every event: a
     // plain file, deleted with the app.
     final DakStateStore inAppStore =
-        dir == null ? SecureDakStorage(secure, _legacyInAppKey) : FileDakStateStore('$dir/in_app.json');
+        dir == null ? SecureDakStorage(key: _legacyInAppKey) : FileDakStateStore('$dir/in_app.json');
     final inApp = DakInAppController(
       api: api,
       storage: inAppStore,
@@ -167,6 +170,7 @@ class Dak {
       openUrl: (url) => launchUrl(url, mode: LaunchMode.externalApplication),
       urlSchemes: options.inAppUrlSchemes,
       sessionTimeout: options.sessionTimeout,
+      appState: () => WidgetsBinding.instance.lifecycleState,
       log: log,
     );
     _client = client;
@@ -179,7 +183,7 @@ class Dak {
     // read, without waiting for the network.
     unawaited(client.loaded.then((_) async {
       if (dir != null) {
-        final legacy = SecureDakStorage(secure, _legacyInAppKey);
+        final legacy = SecureDakStorage(key: _legacyInAppKey);
         await moveLegacyState(readOld: legacy.read, deleteOld: legacy.delete, to: inAppStore, keep: !client.reinstalled);
       }
     }).catchError((Object e) {
@@ -240,7 +244,13 @@ class Dak {
 
   /// Taps on notifications while the app was running in the background.
   /// [DakNotification.actionId] tells which button was tapped, if one was.
+  /// Taps that come before you listen are kept for your first listener.
   static Stream<DakNotification> get onOpened => _c.onOpened;
+
+  /// Changes the server refused, such as a wrong auth hash or a bad tag,
+  /// also from syncs that run in the background. Only the refused field is
+  /// rolled back; the rest (an opt-out above all) is still sent.
+  static Stream<DakException> get onError => _c.onError;
 
   /// Messages that arrive while the app is open, silent ones too (not shown
   /// by the system on Android; show them yourself if you want).

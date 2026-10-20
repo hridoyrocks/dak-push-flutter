@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:dak_push/dak_push.dart';
 import 'package:dak_push/src/api.dart';
 import 'package:dak_push/src/storage.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart' show AppLifecycleState;
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
@@ -18,6 +20,9 @@ class FakeServer {
   final delivered = <String>[];
   bool offline = false;
 
+  /// While set, requests wait for it (a slow network).
+  Completer<void>? hold;
+
   /// In-app messages the server hands out, with their ETag.
   List<Map<String, dynamic>> inApp = [];
   String inAppEtag = '"v1"';
@@ -31,6 +36,7 @@ class FakeServer {
   http.Response? Function(String method, String path, Map<String, dynamic> body)? intercept;
 
   late final client = MockClient((req) async {
+    if (hold != null) await hold!.future;
     if (offline) throw http.ClientException('no network');
     final body = req.body.isEmpty ? <String, dynamic>{} : jsonDecode(req.body) as Map<String, dynamic>;
     final path = req.url.path;
@@ -97,6 +103,8 @@ class FakeServer {
 
   static http.Response error(int status, String code) => _json(status, {'error': {'code': code, 'message': code}});
 
+  static http.Response jsonError(int status, Map<String, Object?> error) => _json(status, {'error': error});
+
   List<String> get calls => [for (final r in requests) '${r.method} ${r.path.split('/').skip(4).join('/')}'];
 }
 
@@ -110,8 +118,14 @@ class FakeMessaging implements DakMessaging {
   final opened = StreamController<DakNotification>.broadcast();
   final foreground = StreamController<DakNotification>.broadcast();
 
+  /// When set, getPushToken waits for it (FID registration on a slow network).
+  Future<void>? tokenDelay;
+
   @override
-  Future<DakPushToken?> getPushToken() async => token == null ? null : DakPushToken(token!, type: tokenType);
+  Future<DakPushToken?> getPushToken() async {
+    if (tokenDelay != null) await tokenDelay;
+    return token == null ? null : DakPushToken(token!, type: tokenType);
+  }
 
   @override
   Stream<DakPushToken> get onPushToken => tokenRefresh.stream.map((t) => DakPushToken(t, type: tokenType));
@@ -223,6 +237,13 @@ class Harness {
 
   late final client = build();
 
+  /// Starts the client and waits for its first sync, which start() no longer
+  /// waits for.
+  Future<void> start() async {
+    await client.start();
+    await client.firstSync;
+  }
+
   DakClient build() => DakClient(
         api: DakApi(baseUrl: 'https://push.test/', appId: 'app-1', client: server.client),
         messaging: messaging,
@@ -287,7 +308,7 @@ Map<String, dynamic> inAppMessage(
 /// A DakInAppController against [FakeServer], with a device already
 /// registered and a clock the test moves.
 class InAppHarness {
-  InAppHarness({MemoryDakStorage? storage, this.registered = true, this.urlSchemes = const {'https', 'http'}})
+  InAppHarness({MemoryDakStorage? storage, this.registered = true, this.appState, this.urlSchemes = const {'https', 'http'}})
       : storage = storage ?? MemoryDakStorage() {
     server.devices['dev-1'] = {'secret': 's1', 'tags': <String, String>{}};
   }
@@ -296,6 +317,7 @@ class InAppHarness {
   final MemoryDakStorage storage;
   final Set<String> urlSchemes;
   bool registered;
+  final AppLifecycleState? Function()? appState;
   DateTime now = DateTime(2026, 10, 20, 12);
   final tagsSet = <Map<String, Object?>>[];
   final opened = <Uri>[];
@@ -312,6 +334,7 @@ class InAppHarness {
     },
     urlSchemes: urlSchemes,
     eventDelay: null,
+    appState: appState,
     clock: () => now,
   )..onClick.listen(clicks.add);
 
@@ -334,4 +357,102 @@ class InAppHarness {
   List<String> get eventTypes => [
         for (final e in server.inAppEvents) '${e['type']} ${e['message_id']}${e['button_id'] == null ? '' : ' ${e['button_id']}'}'
       ];
+}
+
+/// The error the iOS keychain gives before the first unlock since the phone
+/// started.
+PlatformException lockedError() => PlatformException(code: 'Unexpected security result code', message: 'Code: -25308');
+
+/// A storage that fails while [locked], like the keychain of an iPhone that
+/// has not been unlocked since it started; [gate] holds reads back.
+class LockableStorage extends MemoryDakStorage {
+  LockableStorage({this.locked = false});
+  bool locked;
+  Completer<void>? gate;
+  int writes = 0;
+
+  @override
+  Future<String?> read() async {
+    if (gate != null) await gate!.future;
+    if (locked) throw lockedError();
+    return value;
+  }
+
+  @override
+  Future<void> write(String v) async {
+    if (locked) throw lockedError();
+    writes++;
+    value = v;
+  }
+
+  @override
+  Future<void> addReceipt(String messageId) async {
+    if (locked) throw lockedError();
+    return super.addReceipt(messageId);
+  }
+
+  @override
+  Future<List<String>> readReceipts() async {
+    if (locked) throw lockedError();
+    return super.readReceipts();
+  }
+
+  @override
+  Future<void> removeReceipts(Iterable<String> messageIds) async {
+    if (locked) throw lockedError();
+    return super.removeReceipts(messageIds);
+  }
+
+  @override
+  Future<void> clear() async {
+    if (locked) throw lockedError();
+    return super.clear();
+  }
+}
+
+/// The keychain as flutter_secure_storage 10 sees it on iOS: an item saved
+/// with the old accessibility is found only by a legacy read, and blocks a
+/// write until it is deleted.
+class FakeKeychain implements DakKeychain {
+  final items = <String, ({String value, bool legacy})>{};
+  bool locked = false;
+
+  void _check() {
+    if (locked) throw lockedError();
+  }
+
+  @override
+  Future<String?> read(String key) async {
+    _check();
+    final i = items[key];
+    return i == null || i.legacy ? null : i.value;
+  }
+
+  @override
+  Future<String?> readLegacy(String key) async {
+    _check();
+    final i = items[key];
+    return i != null && i.legacy ? i.value : null;
+  }
+
+  @override
+  Future<void> write(String key, String value) async {
+    _check();
+    if (items[key]?.legacy ?? false) {
+      throw PlatformException(code: 'Unexpected security result code', message: 'Code: -25299');
+    }
+    items[key] = (value: value, legacy: false);
+  }
+
+  @override
+  Future<void> delete(String key) async {
+    _check();
+    items.remove(key);
+  }
+
+  @override
+  Future<Iterable<String>> keys() async {
+    _check();
+    return [for (final e in items.entries) if (!e.value.legacy) e.key];
+  }
 }

@@ -62,20 +62,32 @@ class DakPushPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAw
         return false
     }
 
-    /** Reads a tap from an intent once, and closes the notification after a button tap. */
+    /**
+     * Reads a tap from an intent once, and closes the notification after a button tap. Only an intent
+     * from a notification the SDK posted counts: the launcher activity is exported, so any app can
+     * start it with these extras, and the system replays the intent when it restores the app.
+     */
     private fun take(activity: Activity?, intent: Intent?): Map<String, Any?>? {
         if (intent == null || (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) return null
-        val bundle = intent.getBundleExtra(DakNotifier.EXTRA_DATA) ?: return null
-        val data = HashMap<String, String>()
-        for (k in bundle.keySet()) bundle.getString(k)?.let { data[k] = it }
-        val action = intent.getStringExtra(DakNotifier.EXTRA_ACTION)
-        if (action != null) {
-            val ctx = activity ?: context
-            ctx?.let { NotificationManagerCompat.from(it).cancel(intent.getStringExtra(DakNotifier.EXTRA_TAG), intent.getIntExtra(DakNotifier.EXTRA_ID, 0)) }
+        val ctx = activity ?: context ?: return null
+        return try {
+            val bundle = intent.getBundleExtra(DakNotifier.EXTRA_DATA) ?: return null
+            val nonce = intent.getStringExtra(DakNotifier.EXTRA_NONCE)
+            val action = intent.getStringExtra(DakNotifier.EXTRA_ACTION)
+            val tag = intent.getStringExtra(DakNotifier.EXTRA_TAG)
+            val id = intent.getIntExtra(DakNotifier.EXTRA_ID, 0)
+            for (extra in listOf(DakNotifier.EXTRA_DATA, DakNotifier.EXTRA_ACTION, DakNotifier.EXTRA_NONCE, DakNotifier.EXTRA_TAG, DakNotifier.EXTRA_ID)) {
+                intent.removeExtra(extra)
+            }
+            if (!DakTaps.redeem(ctx, nonce)) return null
+            val data = HashMap<String, String>()
+            for (k in bundle.keySet()) bundle.getString(k)?.let { data[k] = it }
+            if (action != null) NotificationManagerCompat.from(ctx).cancel(tag, id)
+            mapOf("data" to data, "action_id" to action)
+        } catch (e: RuntimeException) {
+            // Extras another app made unreadable on purpose.
+            null
         }
-        intent.removeExtra(DakNotifier.EXTRA_DATA)
-        intent.removeExtra(DakNotifier.EXTRA_ACTION)
-        return mapOf("data" to data, "action_id" to action)
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {

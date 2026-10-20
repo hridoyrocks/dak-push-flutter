@@ -36,9 +36,9 @@ class _Local {
       };
 
   static _Local fromJson(Map js) => _Local(
-        shown: (js['shown'] as num?)?.toInt() ?? 0,
+        shown: js['shown'] is num ? (js['shown'] as num).toInt() : 0,
         last: js['last'] is String ? DateTime.tryParse(js['last'] as String) : null,
-        session: (js['session'] as num?)?.toInt() ?? 0,
+        session: js['session'] is num ? (js['session'] as num).toInt() : 0,
         interrupted: js['interrupted'] == true,
       );
 }
@@ -59,6 +59,7 @@ class DakInAppController {
     this.fetchWait = const Duration(seconds: 3),
     this.minFetchInterval = const Duration(minutes: 1),
     this.eventDelay = const Duration(seconds: 2),
+    this.appState,
     DateTime Function()? clock,
     void Function(String message)? log,
   })  : _now = clock ?? DateTime.now,
@@ -93,6 +94,11 @@ class DakInAppController {
   /// Events are sent this long after the last one; null sends only on
   /// [flushEvents] (tests).
   final Duration? eventDelay;
+
+  /// The app's lifecycle state now (WidgetsBinding.instance.lifecycleState).
+  /// Sessions start and messages show only in the foreground; null (tests)
+  /// counts as the foreground.
+  final AppLifecycleState? Function()? appState;
   final DateTime Function() _now;
   final void Function(String) _log;
 
@@ -112,6 +118,16 @@ class DakInAppController {
   late DateTime _sessionStart;
   DateTime? _backgroundAt;
   bool _started = false;
+
+  /// The saved state was read (or was unreadable data); until then nothing
+  /// is saved over it.
+  bool _canSave = false;
+  bool _loadTried = false;
+  Future<void>? _reloading;
+  bool _foreground = true;
+
+  /// Started in the background: the first session waits for the foreground.
+  bool _sessionDue = false;
   bool _paused = false;
   int _blocks = 0;
   final _hosts = <Object>[];
@@ -149,12 +165,21 @@ class DakInAppController {
   @visibleForTesting
   DateTime? nextTimeCheck;
 
-  /// Loads the cache, starts the first session and fetches the list.
+  /// Loads the cache, starts the first session and fetches the list. An app
+  /// launched in the background (a push, a background fetch) starts its
+  /// first session when it comes to the foreground.
   Future<void> start() async {
     if (_started) return;
     _started = true;
     await _load();
     _installedAt ??= _now();
+    final state = appState?.call();
+    _foreground = state == null || state == AppLifecycleState.resumed;
+    if (!_foreground) {
+      _sessionDue = true;
+      await _save();
+      return;
+    }
     _newSession();
     await _save();
     await _sessionStarted();
@@ -200,9 +225,10 @@ class DakInAppController {
     try {
       final res = await api.fetchInApp(c.deviceId, c.secret, etag: _etag);
       if (res != null) {
+        final parsed = _parse(res.messages);
         _raw = res.messages;
         _etag = res.etag;
-        _parse();
+        _messages = parsed;
       }
       _fetchedAt = _now();
       await _save();
@@ -219,10 +245,12 @@ class DakInAppController {
     await flushEvents();
   }
 
-  void _parse() {
+  /// The messages this SDK can show, best first. One it cannot read is
+  /// skipped, never the whole list.
+  List<DakInAppMessage> _parse(List<Object?> raw) {
     final list = <DakInAppMessage>[];
-    for (final raw in _raw) {
-      final m = DakInAppMessage.parse(raw);
+    for (final js in raw) {
+      final m = DakInAppMessage.parse(js);
       if (m == null) {
         _log('dak: skipping an in-app message this SDK version cannot show');
       } else {
@@ -235,7 +263,7 @@ class DakInAppController {
       final p = b.$2.priority.compareTo(a.$2.priority);
       return p != 0 ? p : a.$1.compareTo(b.$1);
     });
-    _messages = [for (final e in indexed) e.$2];
+    return [for (final e in indexed) e.$2];
   }
 
   // ---- triggers and pause
@@ -410,15 +438,21 @@ class DakInAppController {
     switch (state) {
       case AppLifecycleState.hidden:
       case AppLifecycleState.paused:
+        _foreground = false;
         _backgroundAt ??= _now();
         unawaited(flushEvents());
       case AppLifecycleState.resumed:
+        _foreground = true;
+        if (_loadTried && !_canSave) unawaited(_reload());
         final since = _backgroundAt;
         _backgroundAt = null;
-        if (since != null && _now().difference(since) >= sessionTimeout) {
+        if (_sessionDue || (since != null && _now().difference(since) >= sessionTimeout)) {
+          _sessionDue = false;
           _newSession();
           unawaited(_save());
           unawaited(_sessionStarted());
+        } else {
+          _evaluate();
         }
       default:
     }
@@ -438,7 +472,7 @@ class DakInAppController {
       if (queue && current.value!.id != best.id) _pending = true;
       return;
     }
-    if (isPaused || _hosts.isEmpty) return;
+    if (isPaused || _hosts.isEmpty || !_foreground) return;
     // A message back after a pause goes first; what came due meanwhile
     // follows when it closes.
     if (_local[best.id]?.interrupted ?? false) _pending = true;
@@ -602,35 +636,131 @@ class DakInAppController {
         _log('dak: in-app events not sent yet: $e');
         return;
       }
-      _events = _events.sublist(math.min(batch.length, _events.length));
+      // By identity: the list may have changed meanwhile (a reload merged
+      // saved events in front).
+      final sent = Set<Object>.identity()..addAll(batch);
+      _events = [for (final e in _events) if (!sent.contains(e)) e];
       await _save();
     }
   }
 
   // ---- persistence
 
+  /// A read that fails (a locked iPhone) leaves the controller running from
+  /// memory without saving, so the saved state is not replaced; the next
+  /// resume reads it again and keeps what happened meanwhile.
   Future<void> _load() async {
     try {
       final raw = await storage.read();
-      if (raw == null || raw.isEmpty) return;
-      final js = jsonDecode(raw) as Map<String, dynamic>;
-      _raw = (js['messages'] as List?) ?? [];
-      _etag = js['etag'] as String?;
-      _fetchedAt = js['fetched_at'] is String ? DateTime.tryParse(js['fetched_at'] as String) : null;
-      _local = ((js['local'] as Map?) ?? {}).map((k, v) => MapEntry(k as String, _Local.fromJson(v as Map)));
-      _sessions = (js['sessions'] as num?)?.toInt() ?? 0;
-      _installedAt = js['installed_at'] is String ? DateTime.tryParse(js['installed_at'] as String) : null;
-      _events = [for (final e in (js['events'] as List?) ?? []) (e as Map).cast<String, Object?>()];
-      _seq = (js['seq'] as num?)?.toInt() ?? 0;
+      _canSave = true;
+      _restore(raw);
+    } catch (e) {
+      _log('dak: in-app state not readable yet, running from memory: $e');
+    }
+    _loadTried = true;
+  }
+
+  Future<void> _reload() => _reloading ??= _reloadOnce().whenComplete(() => _reloading = null);
+
+  Future<void> _reloadOnce() async {
+    final String? raw;
+    try {
+      raw = await storage.read();
+    } catch (e) {
+      _log('dak: in-app state still not readable: $e');
+      return;
+    }
+    if (_canSave) return;
+    final mem = (
+      raw: _raw,
+      etag: _etag,
+      fetchedAt: _fetchedAt,
+      local: _local,
+      sessions: _sessions,
+      installedAt: _installedAt,
+      events: _events,
+      seq: _seq,
+    );
+    _reset();
+    _restore(raw);
+    // Keep what happened while it could not be read: sessions and shows
+    // continue the saved counts, events are still sent.
+    final before = _sessions;
+    _sessions += mem.sessions;
+    mem.local.forEach((id, l) {
+      final saved = _local[id];
+      _local[id] = _Local(
+        shown: (saved?.shown ?? 0) + l.shown,
+        last: _later(saved?.last, l.last),
+        session: l.session > 0 ? l.session + before : (saved?.session ?? 0),
+        interrupted: l.interrupted || (saved?.interrupted ?? false),
+      );
+    });
+    _installedAt ??= mem.installedAt;
+    _events = [..._events, ...mem.events];
+    if (_events.length > 500) _events = _events.sublist(_events.length - 500);
+    _seq = math.max(_seq, mem.seq);
+    if (mem.fetchedAt != null) {
+      _raw = mem.raw;
+      _etag = mem.etag;
+      _fetchedAt = mem.fetchedAt;
+      _messages = _parse(_raw);
+    }
+    _canSave = true;
+    await _save();
+    _evaluate();
+  }
+
+  void _reset() {
+    _raw = [];
+    _etag = null;
+    _fetchedAt = null;
+    _local = {};
+    _sessions = 0;
+    _installedAt = null;
+    _events = [];
+    _seq = 0;
+    _messages = [];
+  }
+
+  /// Unreadable parts of the saved state are left out, never all of it.
+  void _restore(String? raw) {
+    if (raw == null || raw.isEmpty) return;
+    final Object? js;
+    try {
+      js = jsonDecode(raw);
     } catch (e) {
       _log('dak: ignoring unreadable in-app state: $e');
+      return;
     }
-    _parse();
+    if (js is! Map) return;
+    DateTime? time(Object? v) => v is String ? DateTime.tryParse(v) : null;
+    final messages = js['messages'];
+    _raw = messages is List ? messages : [];
+    _etag = js['etag'] is String ? js['etag'] as String : null;
+    _fetchedAt = time(js['fetched_at']);
+    final local = js['local'];
+    _local = {
+      if (local is Map)
+        for (final e in local.entries)
+          if (e.value is Map) '${e.key}': _Local.fromJson(e.value as Map),
+    };
+    _sessions = js['sessions'] is num ? (js['sessions'] as num).toInt() : 0;
+    _installedAt = time(js['installed_at']);
+    final events = js['events'];
+    _events = [
+      if (events is List)
+        for (final e in events)
+          if (e is Map) {for (final f in e.entries) '${f.key}': f.value},
+    ];
+    _seq = js['seq'] is num ? (js['seq'] as num).toInt() : 0;
+    _messages = _parse(_raw);
   }
 
   /// Saving can fail (a locked keystore); the state then lives in memory
   /// until the next save works.
   Future<void> _save() async {
+    if (!_canSave) return;
     try {
       await storage.write(jsonEncode({
         'v': 1,

@@ -1,25 +1,35 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show HttpDate;
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
 /// An error answer from the Dak server.
 class DakApiException implements Exception {
-  DakApiException(this.status, this.code, this.message, {this.retryAfter});
+  DakApiException(this.status, this.code, this.message, {this.field, this.fromDak = true, this.retryAfter});
 
   final int status;
   final String code;
   final String message;
 
+  /// The request field the server refused, like `tags` or `external_id`.
+  final String? field;
+
+  /// The answer is Dak's own JSON error. A proxy or load balancer in front
+  /// of it (an HTML 403, a 404 page) is not, and is treated as a network
+  /// problem: retried, never acted on.
+  final bool fromDak;
+
   /// How long the server asked the SDK to wait (Retry-After on 429 and 503).
   final Duration? retryAfter;
 
   /// The device is unknown or its secret is wrong: register again.
-  bool get isUnauthorized => status == 401;
+  bool get isUnauthorized => fromDak && status == 401;
 
   /// Retrying the same request cannot succeed (bad input, identity check).
   bool get isPermanent =>
-      status >= 400 && status < 500 && status != 401 && status != 408 && status != 429;
+      fromDak && status >= 400 && status < 500 && status != 401 && status != 408 && status != 429;
 
   @override
   String toString() => 'DakApiException($status $code: $message)';
@@ -115,16 +125,56 @@ class DakApi {
       req.body = jsonEncode(body);
     }
     if (secret != null) req.headers['Authorization'] = 'Device $secret';
-    final res = await http.Response.fromStream(await _http.send(req).timeout(timeout));
+    final res = await _exchange(req);
     if ((res.statusCode >= 200 && res.statusCode < 300) || res.statusCode == 304) return res;
-    var code = 'http_${res.statusCode}';
-    var message = res.reasonPhrase ?? '';
+    Object? err;
     try {
-      final err = (jsonDecode(res.body) as Map<String, dynamic>)['error'] as Map<String, dynamic>;
-      code = err['code'] as String? ?? code;
-      message = err['message'] as String? ?? message;
+      final js = jsonDecode(res.body);
+      if (js is Map) err = js['error'];
     } catch (_) {}
-    throw DakApiException(res.statusCode, code, message, retryAfter: parseRetryAfter(res.headers['retry-after']));
+    final retryAfter = parseRetryAfter(res.headers['retry-after']);
+    if (err is Map && err['code'] is String) {
+      final message = err['message'];
+      final field = err['field'];
+      throw DakApiException(res.statusCode, err['code'] as String, message is String ? message : '',
+          field: field is String && field.isNotEmpty ? field : null, retryAfter: retryAfter);
+    }
+    throw DakApiException(res.statusCode, 'http_${res.statusCode}', res.reasonPhrase ?? '',
+        fromDak: false, retryAfter: retryAfter);
+  }
+
+  /// Sends [req] and reads the whole answer within [timeout]. A server that
+  /// sends headers and then stalls would otherwise hold every later call.
+  Future<http.Response> _exchange(http.BaseRequest req) async {
+    final clock = Stopwatch()..start();
+    final sending = _http.send(req);
+    final http.StreamedResponse streamed;
+    try {
+      streamed = await sending.timeout(timeout);
+    } on TimeoutException {
+      // Close the answer if it still comes.
+      unawaited(sending.then<void>((s) => s.stream.listen(null).cancel(), onError: (Object _) {}));
+      rethrow;
+    }
+    final body = BytesBuilder(copy: false);
+    final done = Completer<void>();
+    final sub = streamed.stream.listen(body.add, onError: done.completeError, onDone: done.complete, cancelOnError: true);
+    final left = timeout - clock.elapsed;
+    try {
+      await done.future.timeout(left.isNegative ? Duration.zero : left);
+    } on TimeoutException {
+      unawaited(sub.cancel());
+      rethrow;
+    }
+    return http.Response.bytes(
+      body.takeBytes(),
+      streamed.statusCode,
+      request: streamed.request,
+      headers: streamed.headers,
+      isRedirect: streamed.isRedirect,
+      persistentConnection: streamed.persistentConnection,
+      reasonPhrase: streamed.reasonPhrase,
+    );
   }
 }
 

@@ -73,8 +73,13 @@ Future<String?> registerFid(dynamic fm, {Duration timeout = const Duration(secon
     // ignore: avoid_dynamic_calls
     await (fm.register() as Future<void>);
   } on NoSuchMethodError {
-    unawaited(first.then((_) {}, onError: (_) {}));
+    first.ignore();
     return null;
+  } catch (_) {
+    // Without this its TimeoutException would reach the app's zone as an
+    // uncaught error.
+    first.ignore();
+    rethrow;
   }
   try {
     return await first;

@@ -6,6 +6,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import 'api.dart';
+import 'buffered_broadcast.dart';
 import 'messaging.dart';
 import 'native.dart';
 import 'notification.dart';
@@ -20,6 +21,13 @@ class DakException implements Exception {
   DakException(this.message, [this.cause]);
   final String message;
   final Object? cause;
+
+  /// The server's error code, like `identity_verification_failed` or
+  /// `invalid`, when the server refused the change.
+  String? get code => switch (cause) { final DakApiException e => e.code, _ => null };
+
+  /// The field the server refused, like `tags` or `external_id`, if it said.
+  String? get field => switch (cause) { final DakApiException e => e.field, _ => null };
 
   @override
   String toString() => 'DakException: $message';
@@ -71,6 +79,7 @@ class DakClient {
       Duration(minutes: 1),
       Duration(minutes: 5),
     ],
+    this.giveUpLoadingAfter = const Duration(minutes: 1),
     this.installMarker,
     DateTime Function()? clock,
     math.Random? random,
@@ -94,7 +103,16 @@ class DakClient {
   /// iOS: the App Group shared with the notification service extension.
   final String? iosAppGroup;
   final Duration lastSeenInterval;
+
+  /// Waits between retries of a failed sync, and of a saved state that could
+  /// not be read; the last one repeats. Empty: no timers (tests).
   final List<Duration> retryDelays;
+
+  /// A saved state that still cannot be read while the app is in the
+  /// foreground this long after the first such try is given up, so the
+  /// device can register again. (A locked iPhone is never in the
+  /// foreground, so this is a broken keychain or keystore.)
+  final Duration giveUpLoadingAfter;
 
   /// A file deleted with the app. The iOS keychain keeps the SDK's state
   /// after an uninstall; a missing marker tells that state belongs to an
@@ -129,31 +147,56 @@ class DakClient {
   String _language = '';
   int? _offset;
 
-  final _openedCtl = StreamController<DakNotification>.broadcast();
+  final _opened = BufferedBroadcast<DakNotification>();
   final _foregroundCtl = StreamController<DakNotification>.broadcast();
   final _registeredCtl = StreamController<void>.broadcast();
+  final _errorsCtl = StreamController<DakException>.broadcast();
   final _loaded = Completer<void>();
+  final _ready = Completer<void>();
   final _subs = <StreamSubscription<dynamic>>[];
+
+  /// What came in before [_ready] (a token, a tap, a receipt): applied then,
+  /// so the saved state cannot overwrite it.
+  final _waiting = <void Function()>[];
   DakNotification? _initial;
+  Future<void>? _starting;
+  Future<void>? _connecting;
+  Future<void>? _loading;
   Future<void>? _running;
   bool _again = false;
   Timer? _retryTimer;
+  Timer? _loadTimer;
   int _failures = 0;
-  DateTime? _notBefore;
-  bool _reRegistered = false;
-  bool _started = false;
+  int _loadFailures = 0;
+  int _tokenEvents = 0;
+  DateTime? _firstForegroundLoadFailure;
+  bool _platformRead = false;
   bool _disposed = false;
   bool _reinstalled = false;
+  DateTime? _notBefore;
+  bool _reRegistered = false;
   String? _sharedWithExtension;
 
   String? get deviceId => _deviceId;
   String? get externalId => _externalId;
   Map<String, String> get tags => Map.unmodifiable(_tags);
-  Stream<DakNotification> get onOpened => _openedCtl.stream;
+
+  /// Taps on notifications. Taps that come while nobody listens are kept
+  /// (20 at most) for the next listener.
+  Stream<DakNotification> get onOpened => _opened.stream;
   Stream<DakNotification> get onForeground => _foregroundCtl.stream;
 
-  /// Completes once saved state is loaded, before any network call.
+  /// Changes the server refused, also from syncs nobody awaited (a retry, a
+  /// token refresh). Only the refused field is rolled back.
+  Stream<DakException> get onError => _errorsCtl.stream;
+
+  /// Completes once saved state is loaded, before any network call. If it
+  /// cannot be read yet (a locked iPhone) this waits for a later try.
   Future<void> get loaded => _loaded.future;
+
+  /// Completes when the first push token fetch and sync after [start] are
+  /// done, whether or not they worked.
+  Future<void> get firstSync => _connecting ?? Future.value();
 
   /// The device's id and secret, for the SDK's other parts (in-app messages).
   ({String deviceId, String secret})? get credentials =>
@@ -168,48 +211,76 @@ class DakClient {
   /// True when the saved state came from an earlier install and was dropped.
   bool get reinstalled => _reinstalled;
 
-  Future<void> start() async {
-    if (_started) return;
-    _started = true;
-    await _load();
-    _loaded.complete();
-    await _takeBackgroundReceipts();
-    _appVersion = clampUtf8(await _orElse(platform.appVersion, '', 'app version'), 32);
-    _osVersion = clampUtf8(await _orElse(platform.osVersion, '', 'OS version'), 32);
-    _language = await _orElse(() async => platform.language(), '', 'language');
-    _offset =
-        shareTimezoneOffset ? await _orElse<int?>(() async => platform.utcOffsetMinutes(), null, 'UTC offset') : null;
-    _permission = await _orElse(messaging.hasPermission, false, 'permission');
-    try {
-      final t = await messaging.getPushToken();
-      if (t != null) {
-        _token = t.value;
-        _tokenType = t.type;
-      }
-    } catch (e) {
-      _log('dak: could not get a push token yet: $e');
-    }
+  /// Reads the saved state and the notification that opened the app, and
+  /// returns. Getting the push token and syncing go on in the background
+  /// ([firstSync]), so a slow network never holds the app's start.
+  Future<void> start() => _starting ??= _start();
+
+  Future<void> _start() async {
+    // Listen first; what comes while the state loads waits for it.
     void onError(Object e) => _log('dak: $e');
-    _subs.add(messaging.onPushToken.listen((t) {
-      _token = t.value;
-      _tokenType = t.type;
-      unawaited(_save().then((_) => _syncQuietly()));
-    }, onError: onError));
+    _subs.add(messaging.onPushToken.listen(
+        (t) => _whenReady(() {
+              _tokenEvents++;
+              _token = t.value;
+              _tokenType = t.type;
+              unawaited(_saveAndSync());
+            }),
+        onError: onError));
     _subs.add(messaging.onOpened.listen((n) => unawaited(_handleOpen(n)), onError: onError));
     _subs.add(native.onAction.listen((n) => unawaited(_handleOpen(n)), onError: onError));
     _subs.add(messaging.onForeground.listen((n) {
-      if (n.id != null) _queueReceipt(n.id!);
+      final id = n.id;
+      if (id != null) _whenReady(() => _queueReceipt(id));
       if (!_foregroundCtl.isClosed) _foregroundCtl.add(n);
     }, onError: onError));
-    var initial = await _orElse(messaging.getInitialNotification, null, 'initial notification') ??
+    await _tryLoad();
+    await _readPlatform();
+    final launch = await _orElse(messaging.getInitialNotification, null, 'initial notification') ??
         await _orElse(native.initialAction, null, 'initial action');
-    if (initial != null) {
-      initial = await _withIOSAction(initial);
+    if (launch != null) {
+      final initial = await _withIOSAction(launch);
       _initial = initial;
-      if (initial.id != null) _queueOpen(initial.id!, initial.actionId);
+      final id = initial.id;
+      if (id != null) _whenReady(() => _queueOpen(id, initial.actionId));
     }
-    await _save();
+    _connecting = _connect();
+  }
+
+  /// The network half of [start]. Never throws.
+  Future<void> _connect() async {
+    await _ready.future;
+    if (_disposed) return;
+    try {
+      await _takeBackgroundReceipts();
+      try {
+        final seen = _tokenEvents;
+        final t = await messaging.getPushToken();
+        // A refresh that came meanwhile is newer.
+        if (t != null && _tokenEvents == seen) {
+          _token = t.value;
+          _tokenType = t.type;
+        }
+      } catch (e) {
+        _log('dak: could not get a push token yet: $e');
+      }
+      await _save();
+    } catch (e) {
+      _log('dak: $e');
+    }
     await _syncQuietly();
+  }
+
+  /// Each detail on its own, so one broken plugin call costs only that one.
+  /// Versions are cut to the server's 32 bytes.
+  Future<void> _readPlatform() async {
+    _appVersion = clampUtf8(await _orElse(platform.appVersion, '', 'app version'), 32);
+    _osVersion = clampUtf8(await _orElse(platform.osVersion, '', 'OS version'), 32);
+    _language = await _orElse(() async => platform.language(), '', 'language');
+    _offset = shareTimezoneOffset ? await _orElse<int?>(() async => platform.utcOffsetMinutes(), null, 'UTC offset') : null;
+    _permission = await _orElse(messaging.hasPermission, false, 'permission');
+    _platformRead = true;
+    _checkReady();
   }
 
   /// Runs [f]; on an error logs it and returns [fallback], so one broken
@@ -223,11 +294,26 @@ class DakClient {
     }
   }
 
+  /// Runs [f] once the saved state is loaded and the platform read.
+  void _whenReady(void Function() f) => _ready.isCompleted ? f() : _waiting.add(f);
+
+  void _checkReady() {
+    if (_ready.isCompleted || !_loaded.isCompleted || !_platformRead) return;
+    _ready.complete();
+    final waiting = List.of(_waiting);
+    _waiting.clear();
+    for (final f in waiting) {
+      f();
+    }
+  }
+
   Future<bool> requestPermission() async {
-    _permission = await messaging.requestPermission();
+    final granted = await messaging.requestPermission();
+    await _ready.future;
+    _permission = granted;
     await _save();
     await _syncQuietly();
-    return _permission;
+    return granted;
   }
 
   /// Links this device to your user. [authHash] is
@@ -236,6 +322,7 @@ class DakClient {
     if (externalId.isEmpty || _bytes(externalId) > 128 || externalId.contains('@')) {
       throw ArgumentError.value(externalId, 'externalId', 'use your own user id (1-128 characters, not an email)');
     }
+    await _ready.future;
     _externalId = externalId;
     _authHash = authHash;
     await _save();
@@ -246,6 +333,7 @@ class DakClient {
   /// this phone starts without them. Push permission and the subscription
   /// stay.
   Future<void> logout() async {
+    await _ready.future;
     _externalId = null;
     _authHash = null;
     _tags = {};
@@ -256,7 +344,7 @@ class DakClient {
   /// Sets tags; a null or empty value removes the tag. Values are stored as
   /// strings (numbers and booleans are converted).
   Future<void> setTags(Map<String, Object?> changes) async {
-    final next = Map.of(_tags);
+    final values = <String, String>{};
     changes.forEach((k, v) {
       if (!_tagKey.hasMatch(k)) {
         throw ArgumentError.value(k, 'tag key', 'must be 1-64 of A-Z a-z 0-9 _ . : -');
@@ -266,12 +354,11 @@ class DakClient {
       }
       final s = v?.toString() ?? '';
       if (_bytes(s) > 255) throw ArgumentError.value(v, k, 'at most 255 bytes of UTF-8');
-      if (s.isEmpty) {
-        next.remove(k);
-      } else {
-        next[k] = s;
-      }
+      values[k] = s;
     });
+    await _ready.future;
+    final next = Map.of(_tags);
+    values.forEach((k, s) => s.isEmpty ? next.remove(k) : next[k] = s);
     if (next.length > 50) throw ArgumentError('a device can have at most 50 tags');
     _tags = next;
     await _save();
@@ -282,6 +369,7 @@ class DakClient {
 
   /// Opts this device out of (false) or back into (true) all pushes.
   Future<void> setSubscribed(bool subscribed) async {
+    await _ready.future;
     _subscribed = subscribed;
     await _save();
     await _sync();
@@ -294,7 +382,13 @@ class DakClient {
   /// changes made in system settings, receipts from the background, a new
   /// UTC offset, and keeps last_seen fresh.
   Future<void> onResume() async {
-    if (!_started || _disposed) return;
+    if (_starting == null || _disposed) return;
+    if (!_loaded.isCompleted) {
+      await _tryLoad();
+      if (!_loaded.isCompleted) _foregroundLoadFailed();
+      if (!_loaded.isCompleted) return;
+    }
+    await _ready.future;
     _permission = await _orElse(messaging.hasPermission, _permission, 'permission');
     if (shareTimezoneOffset) {
       _offset = await _orElse<int?>(() async => platform.utcOffsetMinutes(), _offset, 'UTC offset');
@@ -304,17 +398,23 @@ class DakClient {
   }
 
   /// Sends anything pending now (tests, or after connectivity returns).
-  Future<void> flush() => _syncQuietly();
+  Future<void> flush() async {
+    if (!_loaded.isCompleted) await _tryLoad();
+    if (!_ready.isCompleted) return;
+    await _syncQuietly();
+  }
 
   Future<void> dispose() async {
     _disposed = true;
     _retryTimer?.cancel();
+    _loadTimer?.cancel();
     for (final s in _subs) {
       await s.cancel();
     }
-    await _openedCtl.close();
+    await _opened.close();
     await _foregroundCtl.close();
     await _registeredCtl.close();
+    await _errorsCtl.close();
   }
 
   /// iOS with firebase_messaging 15/16: RemoteMessage has no action id, the
@@ -325,28 +425,39 @@ class DakClient {
     return action == null ? n : n.withAction(action);
   }
 
-  Future<void> _handleOpen(DakNotification n) async {
+  Future<void> _handleOpen(DakNotification tapped) async {
+    var n = tapped;
     try {
-      n = await _withIOSAction(n);
+      n = await _withIOSAction(tapped);
     } catch (e) {
       _log('dak: could not read the tapped button: $e');
     }
-    if (n.id != null) _queueOpen(n.id!, n.actionId);
-    if (!_openedCtl.isClosed) _openedCtl.add(n);
+    final id = n.id;
+    if (id != null) _whenReady(() => _queueOpen(id, n.actionId));
+    _opened.add(n);
   }
 
   void _queueOpen(String id, String? action) {
     if (_opens.any((o) => o.id == id)) return;
     _opens = [..._opens, (id: id, action: action)];
     if (_opens.length > 50) _opens = _opens.sublist(_opens.length - 50);
-    unawaited(_save().then((_) => _syncQuietly()));
+    unawaited(_saveAndSync());
   }
 
   void _queueReceipt(String id) {
     if (_receipts.contains(id)) return;
     _receipts = [..._receipts, id];
     if (_receipts.length > 200) _receipts = _receipts.sublist(_receipts.length - 200);
-    unawaited(_save().then((_) => _syncQuietly()));
+    unawaited(_saveAndSync());
+  }
+
+  Future<void> _saveAndSync() async {
+    try {
+      await _save();
+    } catch (e) {
+      _log('dak: could not save: $e');
+    }
+    await _syncQuietly();
   }
 
   /// Picks up receipts the background handler and the iOS notification
@@ -411,8 +522,9 @@ class DakClient {
   }
 
   Future<void> _loop() async {
-    Object? permanent;
-    var reverted = false;
+    await _ready.future;
+    DakException? refused;
+    final reverted = <String>{};
     _reRegistered = false;
     while (_again && !_disposed) {
       _again = false;
@@ -428,12 +540,15 @@ class DakClient {
           _scheduleRetry(e.retryAfter);
           break;
         }
-        permanent = DakException(e.message, e);
-        if (reverted) break;
-        // The server refused what the app set (bad auth hash, bad tag): go
-        // back to what it last accepted so the rest still gets through.
-        reverted = true;
-        _revertAppState();
+        final error = DakException(e.message, e);
+        refused ??= error;
+        if (!_errorsCtl.isClosed) _errorsCtl.add(error);
+        // The server refused something the app set (a wrong auth hash, a bad
+        // tag): go back to what it last accepted for that field alone, so
+        // the rest (an opt-out above all) still gets through.
+        final field = _revertible(e);
+        if (field == null || !reverted.add(field)) break;
+        _revert(field);
         await _save();
         _again = true;
       } catch (e) {
@@ -442,15 +557,30 @@ class DakClient {
         break;
       }
     }
-    if (permanent != null) throw permanent;
+    if (refused != null) throw refused;
   }
 
-  void _revertAppState() {
-    _externalId = _reported['external_id'] as String?;
-    if (_externalId == null) _authHash = null;
-    final tags = _reported['tags'];
-    _tags = tags is Map ? tags.map((k, v) => MapEntry(k.toString(), v.toString())) : {};
-    _subscribed = _reported['subscribed'] as bool? ?? true;
+  /// The app-set field a refusal is about, if it can be rolled back.
+  /// `subscribed` never is: the user's choice stays.
+  static String? _revertible(DakApiException e) {
+    if (e.code == 'identity_verification_failed') return 'external_id';
+    return switch (e.field) {
+      'external_id' || 'auth_hash' => 'external_id',
+      'tags' => 'tags',
+      _ => null,
+    };
+  }
+
+  void _revert(String field) {
+    switch (field) {
+      case 'external_id':
+        final id = _reported['external_id'];
+        _externalId = id is String ? id : null;
+        if (_externalId == null) _authHash = null;
+      case 'tags':
+        final tags = _reported['tags'];
+        _tags = tags is Map ? tags.map((k, v) => MapEntry(k.toString(), v.toString())) : {};
+    }
   }
 
   /// The longest the SDK honours a Retry-After.
@@ -501,7 +631,7 @@ class DakClient {
       _reported = desired;
       _lastSeenSent = _now();
       await _save();
-      _registeredCtl.add(null);
+      if (!_registeredCtl.isClosed) _registeredCtl.add(null);
       return;
     }
 
@@ -611,34 +741,53 @@ class DakClient {
 
   // ---- persistence
 
-  Future<void> _load() async {
-    final raw = await storage.read();
-    Map<String, dynamic>? js;
+  /// Reads the saved state. A read that fails (the keychain of an iPhone
+  /// not unlocked since it started) is tried again later, and nothing is
+  /// saved or sent until one works, so the stored state is never replaced
+  /// by an empty one.
+  Future<void> _tryLoad() => _loading ??= _loadOnce().whenComplete(() => _loading = null);
+
+  Future<void> _loadOnce() async {
+    if (_loaded.isCompleted || _disposed) return;
+    final String? raw;
     try {
-      if (raw != null && raw.isNotEmpty) js = jsonDecode(raw) as Map<String, dynamic>;
+      raw = await storage.read();
     } catch (e) {
-      _log('dak: ignoring unreadable saved state: $e');
+      _log('dak: saved state not readable yet, will try again: $e');
+      _scheduleLoadRetry();
+      return;
     }
-    if (await _fromEarlierInstall(js?['install'])) {
+    _loadTimer?.cancel();
+    var state = raw;
+    if (await _fromEarlierInstall(state)) {
       _log('dak: the saved state is from an earlier install of the app; starting over');
       _reinstalled = true;
-      js = null;
+      state = null;
       try {
         await storage.clear();
       } catch (e) {
         _log('dak: could not clear the old state: $e');
       }
     }
-    if (js != null) _read(js);
+    _restore(state);
     await _markInstall();
+    _loadedNow();
   }
 
   /// The iOS keychain survives an uninstall, a file in the app's folder does
   /// not. State that names an install the marker does not know is old. State
   /// without an install id comes from SDK 0.3, before the marker: kept.
-  Future<bool> _fromEarlierInstall(Object? saved) async {
+  Future<bool> _fromEarlierInstall(String? raw) async {
     final marker = installMarker;
-    if (marker == null || saved is! String) return false;
+    if (marker == null || raw == null || raw.isEmpty) return false;
+    Object? saved;
+    try {
+      final js = jsonDecode(raw);
+      if (js is Map) saved = js['install'];
+    } catch (_) {
+      return false;
+    }
+    if (saved is! String) return false;
     try {
       return await marker.read() != saved;
     } catch (e) {
@@ -668,29 +817,69 @@ class DakClient {
     return [for (var i = 0; i < 16; i++) r.nextInt(256).toRadixString(16).padLeft(2, '0')].join();
   }
 
-  void _read(Map<String, dynamic> js) {
+  void _loadedNow() {
+    if (_loaded.isCompleted) return;
+    _loaded.complete();
+    _checkReady();
+  }
+
+  void _scheduleLoadRetry() {
+    _loadTimer?.cancel();
+    if (retryDelays.isEmpty || _disposed) return;
+    final delay = retryDelays[_loadFailures < retryDelays.length ? _loadFailures : retryDelays.length - 1];
+    _loadFailures++;
+    _loadTimer = Timer(delay, () => unawaited(_tryLoad()));
+  }
+
+  /// The app is in the foreground, so the phone is unlocked, and the state
+  /// still cannot be read: after [giveUpLoadingAfter], start over.
+  void _foregroundLoadFailed() {
+    final now = _now();
+    final first = _firstForegroundLoadFailure ??= now;
+    if (now.difference(first) < giveUpLoadingAfter) return;
+    _log('dak: the saved state cannot be read; starting over');
+    _loadTimer?.cancel();
+    unawaited(_markInstall());
+    _loadedNow();
+  }
+
+  void _restore(String? raw) {
+    if (raw == null || raw.isEmpty) return;
+    final Object? decoded;
     try {
-      _deviceId = js['device_id'] as String?;
-      _secret = js['secret'] as String?;
-      _token = js['token'] as String?;
-      _tokenType = js['token_type'] as String? ?? 'token';
-      _externalId = js['external_id'] as String?;
-      _authHash = js['auth_hash'] as String?;
-      _tags = (js['tags'] as Map?)?.map((k, v) => MapEntry(k as String, v as String)) ?? {};
-      _subscribed = js['subscribed'] as bool? ?? true;
-      _reported = (js['reported'] as Map?)?.cast<String, Object?>() ?? {};
-      final seen = js['last_seen_sent'] as String?;
-      _lastSeenSent = seen == null ? null : DateTime.tryParse(seen);
-      _opens = [
-        for (final o in (js['opens'] as List?) ?? const [])
-          // Version 1 kept only message ids.
-          if (o is String) (id: o, action: null) else if (o is Map) (id: o['id'] as String, action: o['action'] as String?),
-      ];
-      _receipts = (js['receipts'] as List?)?.cast<String>() ?? [];
-      _install = js['install'] as String?;
+      decoded = jsonDecode(raw);
     } catch (e) {
       _log('dak: ignoring unreadable saved state: $e');
+      return;
     }
+    if (decoded is! Map) return;
+    String? text(Object? v) => v is String ? v : null;
+    _deviceId = text(decoded['device_id']);
+    _secret = text(decoded['secret']);
+    _token = text(decoded['token']);
+    _tokenType = text(decoded['token_type']) ?? 'token';
+    _externalId = text(decoded['external_id']);
+    _authHash = text(decoded['auth_hash']);
+    final tags = decoded['tags'];
+    _tags = tags is Map ? {for (final e in tags.entries) if (e.value is String) '${e.key}': e.value as String} : {};
+    _subscribed = decoded['subscribed'] is bool ? decoded['subscribed'] as bool : true;
+    final reported = decoded['reported'];
+    _reported = reported is Map ? {for (final e in reported.entries) '${e.key}': e.value} : {};
+    final seen = text(decoded['last_seen_sent']);
+    _lastSeenSent = seen == null ? null : DateTime.tryParse(seen);
+    final opens = decoded['opens'];
+    _opens = [
+      if (opens is List)
+        for (final o in opens)
+          // Version 1 kept only message ids.
+          if (o is String)
+            (id: o, action: null)
+          else if (o is Map && o['id'] is String)
+            (id: o['id'] as String, action: text(o['action'])),
+    ];
+    final receipts = decoded['receipts'];
+    _receipts = [if (receipts is List) for (final r in receipts) if (r is String) r];
+    _install = text(decoded['install']);
   }
 
   /// Saving can fail (a locked keystore); the state then lives in memory

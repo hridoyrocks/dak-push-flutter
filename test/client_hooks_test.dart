@@ -11,7 +11,7 @@ void main() {
 
     var loadedFirst = false;
     final loaded = h.client.loaded.then((_) => loadedFirst = h.server.requests.isEmpty);
-    await h.client.start();
+    await h.start();
     await loaded;
     expect(loadedFirst, isTrue, reason: 'loaded completes before any network call');
     await settle();

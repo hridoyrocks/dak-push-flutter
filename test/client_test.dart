@@ -6,7 +6,7 @@ import 'fakes.dart';
 void main() {
   test('start registers the device with what the server needs, and nothing more', () async {
     final h = Harness();
-    await h.client.start();
+    await h.start();
 
     expect(h.server.calls, ['POST devices']);
     final body = h.server.requests.single.body;
@@ -32,26 +32,26 @@ void main() {
   test('a restart does not register again, and only refreshes last seen when stale', () async {
     final storage = MemoryDakStorage();
     final first = Harness(storage: storage);
-    await first.client.start();
+    await first.start();
 
     final second = Harness(storage: storage);
     second.server.devices.addAll(first.server.devices);
     second.now = first.now.add(const Duration(hours: 1));
-    await second.client.start();
+    await second.start();
     expect(second.server.calls, isEmpty, reason: 'nothing changed, last seen is fresh');
 
     final third = Harness(storage: storage);
     third.server.devices.addAll(first.server.devices);
     third.now = first.now.add(const Duration(hours: 13));
     third.platform.version = '8.0.3+540';
-    await third.client.start();
+    await third.start();
     expect(third.server.calls, ['PATCH devices/dev-1']);
     expect(third.server.requests.single.body, {'app_version': '8.0.3+540'});
   });
 
   test('login sends the user id with its hash; logout clears it', () async {
     final h = Harness();
-    await h.client.start();
+    await h.start();
     await h.client.login('123', authHash: 'abc');
     expect(h.server.requests.last.body, {'external_id': '123', 'auth_hash': 'abc'});
     expect(h.server.devices['dev-1']!['external_id'], '123');
@@ -65,7 +65,7 @@ void main() {
 
   test('tags: only the changes are sent, null and empty remove', () async {
     final h = Harness();
-    await h.client.start();
+    await h.start();
     await h.client.setTags({'level': 'b2', 'score': 5, 'vip': true});
     expect(h.server.requests.last.body, {
       'tags': {'level': 'b2', 'score': '5', 'vip': 'true'}
@@ -86,7 +86,7 @@ void main() {
   test('changes made offline are kept and sent later', () async {
     final h = Harness();
     h.server.offline = true;
-    await h.client.start(); // fails quietly
+    await h.start(); // fails quietly
     await h.client.login('123', authHash: 'abc'); // network errors do not throw
     await h.client.setTags({'level': 'b2'});
     expect(h.client.deviceId, isNull);
@@ -104,17 +104,17 @@ void main() {
     final storage = MemoryDakStorage();
     final first = Harness(storage: storage);
     first.server.offline = true;
-    await first.client.start();
+    await first.start();
     await first.client.setTags({'level': 'b2'});
 
     final second = Harness(storage: storage);
-    await second.client.start();
+    await second.start();
     expect(second.server.requests.single.body['tags'], {'level': 'b2'});
   });
 
   test('a token refresh is sent', () async {
     final h = Harness();
-    await h.client.start();
+    await h.start();
     h.messaging.tokenRefresh.add('fcm-token-2');
     await settle();
     expect(h.server.requests.last.body, {'token': 'fcm-token-2', 'token_type': 'token'});
@@ -123,7 +123,7 @@ void main() {
 
   test('when the server forgot the device, it registers again with everything', () async {
     final h = Harness();
-    await h.client.start();
+    await h.start();
     await h.client.login('123', authHash: 'abc');
     await h.client.setTags({'level': 'b2'});
 
@@ -141,7 +141,7 @@ void main() {
 
   test('a refused auth hash throws and is rolled back, other changes still go', () async {
     final h = Harness();
-    await h.client.start();
+    await h.start();
     await h.client.setTags({'level': 'b2'});
     h.server.intercept = (method, path, body) =>
         body['auth_hash'] == 'wrong' ? FakeServer.error(403, 'identity_verification_failed') : null;
@@ -155,7 +155,7 @@ void main() {
 
   test('permission prompt result is reported', () async {
     final h = Harness();
-    await h.client.start();
+    await h.start();
     expect(await h.client.requestPermission(), isTrue);
     expect(h.server.requests.last.body, {'push_permission': true});
 
@@ -167,7 +167,7 @@ void main() {
   test('opens are reported once, for launch and background taps', () async {
     final h = Harness();
     h.messaging.initial = DakNotification.fromData({'_dak_id': 'msg-1', '_dak_url': 'app://a', 'type': 'x'});
-    await h.client.start();
+    await h.start();
     await settle();
     expect(h.client.initialNotification!.url, 'app://a');
     expect(h.client.initialNotification!.data, {'type': 'x'});
@@ -187,7 +187,7 @@ void main() {
     final h = Harness();
     h.server.offline = true;
     h.messaging.initial = DakNotification.fromData({'_dak_id': 'msg-1'});
-    await h.client.start();
+    await h.start();
     h.server.offline = false;
     await h.client.flush();
     expect(h.server.calls, ['POST devices', 'POST devices/dev-1/opened']);
@@ -195,7 +195,7 @@ void main() {
 
   test('foreground messages are passed through', () async {
     final h = Harness();
-    await h.client.start();
+    await h.start();
     final got = <DakNotification>[];
     h.client.onForeground.listen(got.add);
     h.messaging.foreground.add(DakNotification.fromData(
@@ -213,7 +213,7 @@ void main() {
   test('without a token nothing is registered until one arrives', () async {
     final h = Harness();
     h.messaging.token = null;
-    await h.client.start();
+    await h.start();
     expect(h.server.calls, isEmpty);
     h.messaging.tokenRefresh.add('late-token');
     await settle();
