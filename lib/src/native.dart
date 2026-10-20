@@ -1,12 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter/services.dart';
+import 'package:meta/meta.dart';
 
 import 'buffered_broadcast.dart';
 import 'notification.dart';
 
 /// The SDK's own native code: Android notifications with buttons, the
 /// settings the iOS notification service extension reads, and the badge.
+@internal
 abstract class DakNative {
   /// Android: the SDK-shown notification that launched the app, if any.
   Future<DakNotification?> initialAction();
@@ -41,7 +43,10 @@ abstract class DakNative {
   Future<void> removeExtensionReceipts(String appGroup, List<String> messageIds);
 }
 
+/// [DakNative] through the plugin's method channel.
 class MethodChannelDakNative implements DakNative {
+  /// Creates the channel and listens for the plugin's calls (button taps on
+  /// iOS).
   MethodChannelDakNative() {
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'onAction') {
@@ -102,6 +107,7 @@ class MethodChannelDakNative implements DakNative {
 }
 
 /// No native code (tests).
+@internal
 class NoDakNative implements DakNative {
   const NoDakNative();
 

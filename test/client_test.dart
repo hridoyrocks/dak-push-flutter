@@ -1,4 +1,5 @@
 import 'package:dak_push/dak_push.dart';
+import 'package:dak_push/src/storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fakes.dart';

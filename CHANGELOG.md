@@ -1,9 +1,19 @@
-## 0.4.0 (2026-10-21)
+# Changelog
+
+All notable changes to dak_push. Versions follow [semantic versioning](https://semver.org);
+below 1.0 a breaking change raises the minor version. **Breaking** marks
+changes that need code or settings changes in apps.
+
+## 0.4.0 - 2026-10-21
 
 Correctness and robustness fixes from a review of the SDK.
 
 **Breaking**
 
+- The minimums are now iOS 15 (podspec and Package.swift) and Android
+  minSdk 23. firebase_messaging 16+ (Firebase iOS SDK 12) and
+  flutter_secure_storage 10 already needed them; apps below must raise their
+  deployment target and `minSdk`. See the README's Requirements.
 - `Dak.logout()` also removes the device's tags, so the next user of the phone
   does not get them.
 - `baseUrl` must be `https`; plain `http` only for `localhost`, `127.0.0.1`,
@@ -12,12 +22,11 @@ Correctness and robustness fixes from a review of the SDK.
   and now shows any message, not only those with buttons.
 - In-app messages: one that `pauseInApp` or `DakInAppBlock` hides before the
   user closed it comes back afterwards, also when its frequency is `once`.
-- For custom implementations only: `DakStorage` keeps background receipts one
-  entry each (`addReceipt`, `readReceipts`, `removeReceipts`, `clear`) instead
-  of `readReceipts`/`writeReceipts`; `DakNative.show` returns `bool`, and
-  `DakNative` has `storageDirectory`, `extensionReceipts` and
-  `removeExtensionReceipts`; `DakKeychain` has `keys()`;
-  `DakInAppController.storage` is a `DakStateStore`.
+- The SDK's internals are no longer exported from
+  `package:dak_push/dak_push.dart`: `DakClient`, `DakMessaging`,
+  `DakPushToken`, `DakNative`, `NoDakNative`, `DakPlatformInfo`, `DakStorage`,
+  `MemoryDakStorage` and `receiptToken`. Apps use `Dak`; these served the
+  SDK's own tests, and their interfaces changed in this release too.
 
 **Client**
 
@@ -86,7 +95,18 @@ Correctness and robustness fixes from a review of the SDK.
 - The cache is a plain file in the SDK's folder instead of secure storage
   (moved once).
 - No more CurvedAnimation per build.
-## 0.3.1 (2026-10-21)
+
+**Project**
+
+- The example app has its Android and iOS projects.
+- README: Requirements, platform setup and troubleshooting; a guide for
+  [migrating from OneSignal](doc/migrating-from-onesignal.md); SECURITY.md and
+  CONTRIBUTING.md.
+- API docs for every public member. `DakInAppCondition` and
+  `DakInAppFrequency` are exported: they are the types of
+  `DakInAppMessage.triggers` and `frequency`.
+
+## 0.3.1 - 2026-10-21
 
 Security and data-loss fixes. No API is removed; update and rebuild.
 
@@ -132,7 +152,7 @@ Security and data-loss fixes. No API is removed; update and rebuild.
   button, no buttons and no click action now shows the X (the server rejects
   that combination too).
 
-## 0.3.0
+## 0.3.0 - 2026-10-20
 
 - Delivered receipts: a background message handler on Android (or
   `Dak.handleBackgroundMessage` from your own), the foreground stream, and a
@@ -146,12 +166,13 @@ Security and data-loss fixes. No API is removed; update and rebuild.
 - Opt-in UTC offset for local-time delivery (`shareTimezoneOffset`).
 - `Dak.setBadge`, `Dak.clearBadge`, `Dak.showNotification`, silent pushes in
   `onForeground` (`isSilent`).
-- `DakMessaging` now returns `DakPushToken` (value and type), and
-  `DakPlatformInfo` has `utcOffsetMinutes()`; `DakStorage` keeps receipts.
+- **Breaking** for apps with their own `DakMessaging`, `DakPlatformInfo` or
+  `DakStorage`: `DakMessaging` now returns `DakPushToken` (value and type),
+  `DakPlatformInfo` has `utcOffsetMinutes()`, and `DakStorage` keeps receipts.
 - The SDK version reported to the server is 0.3.0: the server shows Android
   buttons only from this version on.
 
-## 0.2.0
+## 0.2.0 - 2026-10-20
 
 - In-app messages: modal, top/bottom banner, full-screen and card layouts in
   plain Flutter widgets; buttons with deep link, URL, tag, dismiss and custom
@@ -163,7 +184,7 @@ Security and data-loss fixes. No API is removed; update and rebuild.
   `Dak.onInAppClick`, `DakOptions.sessionTimeout`.
 - New dependency: url_launcher 6 (opens `url` actions).
 
-## 0.1.0
+## 0.1.0 - 2026-10-20
 
 - First version: registration, login/logout with identity hash, tags,
   subscribe/unsubscribe, permission prompt, open tracking, foreground stream,

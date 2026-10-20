@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:crypto/crypto.dart';
-import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:meta/meta.dart';
 
 import 'api.dart';
 import 'buffered_broadcast.dart';
@@ -13,13 +13,20 @@ import 'notification.dart';
 import 'platform_info.dart';
 import 'storage.dart';
 
+/// The SDK version reported to the server. A test checks that it matches
+/// pubspec.yaml, the podspec and build.gradle.
 const kDakSdkVersion = '0.4.0';
 
 /// A problem the app has to fix, such as a wrong auth hash or a bad tag.
 /// Network trouble never throws: changes are kept and sent later.
 class DakException implements Exception {
+  /// Creates an exception with [message] and the error that caused it.
   DakException(this.message, [this.cause]);
+
+  /// What went wrong, for developers.
   final String message;
+
+  /// The underlying error, usually a [DakApiException] from the server.
   final Object? cause;
 
   /// The server's error code, like `identity_verification_failed` or
@@ -56,12 +63,14 @@ String clampUtf8(String s, int max) {
 
 /// hex(sha256(device secret)): what the iOS notification service extension
 /// holds. It can report deliveries and nothing else.
+@internal
 String receiptToken(String deviceSecret) => sha256.convert(utf8.encode(deviceSecret)).toString();
 
 /// The SDK's logic: it keeps the state the app wants (token, user, tags,
 /// permission) and the state the server last accepted, and sends the
 /// difference whenever they differ. Everything is saved, so changes made
 /// offline are sent on a later start.
+@internal
 class DakClient {
   DakClient({
     required this.api,
@@ -277,7 +286,8 @@ class DakClient {
     _appVersion = clampUtf8(await _orElse(platform.appVersion, '', 'app version'), 32);
     _osVersion = clampUtf8(await _orElse(platform.osVersion, '', 'OS version'), 32);
     _language = await _orElse(() async => platform.language(), '', 'language');
-    _offset = shareTimezoneOffset ? await _orElse<int?>(() async => platform.utcOffsetMinutes(), null, 'UTC offset') : null;
+    _offset =
+        shareTimezoneOffset ? await _orElse<int?>(() async => platform.utcOffsetMinutes(), null, 'UTC offset') : null;
     _permission = await _orElse(messaging.hasPermission, false, 'permission');
     _platformRead = true;
     _checkReady();
@@ -642,7 +652,16 @@ class DakClient {
       patch['token'] = desired['token'];
       patch['token_type'] = desired['token_type'];
     }
-    for (final f in ['platform', 'app_version', 'os_version', 'sdk_version', 'language', 'push_permission', 'subscribed', 'utc_offset_minutes']) {
+    for (final f in [
+      'platform',
+      'app_version',
+      'os_version',
+      'sdk_version',
+      'language',
+      'push_permission',
+      'subscribed',
+      'utc_offset_minutes'
+    ]) {
       if (desired[f] != _reported[f]) patch[f] = desired[f];
     }
     if (desired['external_id'] != _reported['external_id']) {
@@ -861,7 +880,12 @@ class DakClient {
     _externalId = text(decoded['external_id']);
     _authHash = text(decoded['auth_hash']);
     final tags = decoded['tags'];
-    _tags = tags is Map ? {for (final e in tags.entries) if (e.value is String) '${e.key}': e.value as String} : {};
+    _tags = tags is Map
+        ? {
+            for (final e in tags.entries)
+              if (e.value is String) '${e.key}': e.value as String
+          }
+        : {};
     _subscribed = decoded['subscribed'] is bool ? decoded['subscribed'] as bool : true;
     final reported = decoded['reported'];
     _reported = reported is Map ? {for (final e in reported.entries) '${e.key}': e.value} : {};
@@ -878,7 +902,11 @@ class DakClient {
             (id: o['id'] as String, action: text(o['action'])),
     ];
     final receipts = decoded['receipts'];
-    _receipts = [if (receipts is List) for (final r in receipts) if (r is String) r];
+    _receipts = [
+      if (receipts is List)
+        for (final r in receipts)
+          if (r is String) r
+    ];
     _install = text(decoded['install']);
   }
 
@@ -907,7 +935,9 @@ class DakClient {
         'subscribed': _subscribed,
         'reported': _reported,
         'last_seen_sent': _lastSeenSent?.toIso8601String(),
-        'opens': [for (final o in _opens) {'id': o.id, if (o.action != null) 'action': o.action}],
+        'opens': [
+          for (final o in _opens) {'id': o.id, if (o.action != null) 'action': o.action}
+        ],
         'receipts': _receipts,
         if (_install != null) 'install': _install,
       });

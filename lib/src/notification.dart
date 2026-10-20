@@ -2,9 +2,13 @@ import 'dart:convert';
 
 /// A notification button, as the message was sent.
 class DakButton {
+  /// Creates a button; the SDK makes them from the message.
   const DakButton({required this.id, required this.text, this.url});
 
+  /// The button's id, as [DakNotification.actionId] reports a tap on it.
   final String id;
+
+  /// The button's label.
   final String text;
 
   /// The deep link for this button, if it has its own.
@@ -16,6 +20,7 @@ class DakButton {
 
 /// A push notification as the app sees it.
 class DakNotification {
+  /// Creates a notification; the SDK makes them from FCM messages.
   const DakNotification({
     this.id,
     this.title,
@@ -30,7 +35,11 @@ class DakNotification {
 
   /// Dak's message id, or null for pushes not sent through Dak.
   final String? id;
+
+  /// The title, or null for a silent push.
   final String? title;
+
+  /// The text, or null for a silent push.
   final String? body;
 
   /// The deep link: the tapped button's own URL if it has one, otherwise the
@@ -53,8 +62,13 @@ class DakNotification {
   /// The FCM data as it came, with Dak's keys.
   final Map<String, String> raw;
 
+  /// The data key of Dak's message id.
   static const idKey = '_dak_id';
+
+  /// The data key of the message's deep link.
   static const urlKey = '_dak_url';
+
+  /// The data key of the buttons, as JSON.
   static const buttonsKey = '_dak_buttons';
 
   /// A silent (data only) push has neither title nor body.
@@ -106,6 +120,8 @@ class DakNotification {
         actionId: actionId,
       );
 
+  /// Reads the buttons from their JSON; an empty list when there are none or
+  /// the JSON is bad.
   static List<DakButton> parseButtons(String? json) {
     if (json == null || json.isEmpty) return const [];
     try {

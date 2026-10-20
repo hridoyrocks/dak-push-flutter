@@ -1,0 +1,221 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+  # Weekly, so a new Flutter or dependency release that breaks the SDK shows
+  # up before users report it.
+  schedule:
+    - cron: '0 3 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The toolchain the gating jobs use. Raise it on purpose, not by surprise;
+  # the compatibility job also runs the newest stable.
+  FLUTTER_VERSION: '3.35.7'
+
+jobs:
+  analyze:
+    name: Analyze, format, docs, publish check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
+      - name: Format
+        run: dart format --output=none --set-exit-if-changed .
+      - name: Analyze
+        run: flutter analyze
+      - name: Analyze example
+        working-directory: example
+        run: flutter pub get && flutter analyze
+      - name: API docs
+        run: |
+          out=$(dart doc --dry-run 2>&1) || { echo "$out"; exit 1; }
+          echo "$out" | tail -n 3
+          echo "$out" | grep -q 'Found 0 warnings and 0 errors' || { echo '::error::dart doc reported warnings'; exit 1; }
+      - name: Publish check
+        run: flutter pub publish --dry-run
+
+  test:
+    name: Test with coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
+      - run: flutter test --coverage
+      - name: Coverage summary
+        run: |
+          awk -F: '
+            /^SF:/ { file = $2; sub(".*/lib/", "lib/", file) }
+            /^LF:/ { lf[file] = $2; total_lf += $2 }
+            /^LH:/ { lh[file] = $2; total_lh += $2 }
+            END {
+              print "### Line coverage: " sprintf("%.1f", 100 * total_lh / total_lf) "%"
+              print ""
+              print "| File | Lines | Covered |"
+              print "|---|---:|---:|"
+              for (f in lf) printf "| %s | %d | %.1f%% |\n", f, lf[f], lf[f] ? 100 * lh[f] / lf[f] : 100
+            }' coverage/lcov.info >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage
+          path: coverage/lcov.info
+          if-no-files-found: error
+
+  compatibility:
+    # The pubspec promises wide dependency ranges and Flutter 3.22+; check the
+    # edges. Infos are not fatal here: older and newer lint sets differ.
+    name: Compatibility (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: firebase_messaging 15
+            flutter: '3.35.7'
+            setup: flutter pub add 'firebase_messaging:>=15.0.0 <16.0.0'
+          - name: firebase_messaging 16
+            flutter: '3.35.7'
+            setup: flutter pub add 'firebase_messaging:>=16.0.0 <17.0.0'
+          - name: firebase_messaging 17
+            flutter: '3.35.7'
+            setup: flutter pub add 'firebase_messaging:>=17.0.0 <18.0.0'
+          # On the oldest Flutter, because the lowest versions are from its
+          # time: win32 5.0.0 (via device_info_plus 10.0) does not compile on
+          # Dart 3.5+.
+          - name: lowest dependencies
+            flutter: '3.22.3'
+            setup: flutter pub downgrade
+          - name: oldest Flutter
+            flutter: '3.22.3'
+            setup: flutter pub get
+          - name: newest Flutter
+            flutter: ''
+            setup: flutter pub upgrade
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ matrix.flutter }}
+          cache: true
+      - name: Resolve
+        run: ${{ matrix.setup }}
+      - name: Resolved versions
+        run: flutter pub deps --style=compact | grep -E '^- (firebase_core|firebase_messaging|flutter_secure_storage|package_info_plus|device_info_plus|url_launcher|http|crypto) '
+      - run: flutter analyze --no-fatal-infos
+      - run: flutter test
+
+  example-android:
+    name: Example (Android APK)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Build APK
+        working-directory: example
+        run: flutter build apk --release
+
+  example-ios:
+    name: Example (iOS simulator, ${{ matrix.deps }})
+    runs-on: macos-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - deps: CocoaPods
+          # firebase_core 5 and firebase_messaging 17 import the FlutterFramework
+          # Swift package, which Flutter 3.35 does not generate.
+          - deps: Swift Package Manager
+            flutter: '3.47.7'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # With Swift Package Manager, Flutter 3.47 names a path dependency's
+          # package after its folder, and Xcode then wants that to be the
+          # plugin's name; a checkout in dak-push-flutter/ fails to resolve.
+          path: dak_push
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ matrix.flutter || env.FLUTTER_VERSION }}
+          cache: true
+      - name: Use Swift Package Manager
+        if: matrix.deps == 'Swift Package Manager'
+        run: flutter config --enable-swift-package-manager
+      - name: Build for the simulator
+        working-directory: dak_push/example
+        run: flutter build ios --simulator --no-codesign
+
+  app-ios-spm:
+    # A new app outside this repository that installs dak_push from git, the
+    # way apps do (pub puts it in .pub-cache/git/dak-push-flutter-<commit>),
+    # built with Swift Package Manager.
+    name: App with dak_push from git (iOS simulator, Swift Package Manager)
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: dak-push-flutter
+          # pub clones the repository, which git cannot do from a shallow one.
+          fetch-depth: 0
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          # firebase_core 5 and firebase_messaging 17 import the FlutterFramework
+          # Swift package, which Flutter 3.35 does not generate.
+          flutter-version: '3.47.7'
+          cache: true
+      - run: flutter config --enable-swift-package-manager
+      - name: Create the app
+        run: |
+          sdk="$GITHUB_WORKSPACE/dak-push-flutter"
+          git -C "$sdk" checkout -q -B under-test
+          sha=$(git -C "$sdk" rev-parse HEAD)
+          flutter create --platforms ios --org com.example --project-name dak_app "$RUNNER_TEMP/dak_app"
+          cd "$RUNNER_TEMP/dak_app"
+          sed -i '' -E 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]+;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/' ios/Runner.xcodeproj/project.pbxproj
+          flutter pub add "dak_push:{\"git\":{\"url\":\"$sdk\",\"ref\":\"$sha\"}}"
+          cat > lib/main.dart <<'DART'
+          import 'package:dak_push/dak_push.dart';
+          import 'package:flutter/material.dart';
+
+          Future<void> main() async {
+            WidgetsFlutterBinding.ensureInitialized();
+            await Dak.init(appId: 'app', baseUrl: 'https://push.example.com');
+            runApp(const MaterialApp(builder: Dak.inAppBuilder, home: SizedBox()));
+          }
+          DART
+          rm -rf test
+          grep -A1 '"name": "dak_push"' .dart_tool/package_config.json
+      - name: Build for the simulator
+        working-directory: ${{ runner.temp }}/dak_app
+        run: flutter build ios --simulator --no-codesign

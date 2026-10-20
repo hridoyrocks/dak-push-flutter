@@ -5,7 +5,7 @@ import 'dart:math' as math;
 
 import 'package:dak_push/dak_push.dart';
 import 'package:dak_push/src/api.dart';
-import 'package:dak_push/src/client.dart' show clampUtf8;
+import 'package:dak_push/src/client.dart' show DakClient, clampUtf8;
 import 'package:dak_push/src/dak.dart' show DakOnce;
 import 'package:dak_push/src/storage.dart';
 import 'package:flutter/services.dart';
@@ -77,7 +77,7 @@ void main() {
       final h = Harness(installMarker: marker);
       await h.start();
       expect(marker.value, hasLength(32));
-      expect(jsonDecode(h.storage.value!)['install'], marker.value);
+      expect((jsonDecode(h.storage.value!) as Map<String, Object?>)['install'], marker.value);
       expect(h.client.reinstalled, isFalse);
     });
 
@@ -115,7 +115,7 @@ void main() {
       expect(second.server.requests.single.body['external_id'], isNull);
       expect(second.server.delivered, isEmpty);
       expect(storage.receipts, isEmpty);
-      expect(jsonDecode(storage.value!)['install'], marker.value);
+      expect((jsonDecode(storage.value!) as Map<String, Object?>)['install'], marker.value);
     });
 
     test('state from SDK 0.3 (no install id) is kept and marked', () async {
@@ -123,7 +123,7 @@ void main() {
       final old = Harness(storage: storage);
       await old.start();
       await old.client.login('7');
-      expect(jsonDecode(storage.value!).containsKey('install'), isFalse);
+      expect((jsonDecode(storage.value!) as Map<String, Object?>).containsKey('install'), isFalse);
 
       final marker = MemoryStateStore();
       final upgraded = Harness(storage: storage, installMarker: marker);
@@ -132,7 +132,7 @@ void main() {
       expect(upgraded.client.reinstalled, isFalse);
       expect(upgraded.client.externalId, '7');
       expect(marker.value, isNotNull);
-      expect(jsonDecode(storage.value!)['install'], marker.value);
+      expect((jsonDecode(storage.value!) as Map<String, Object?>)['install'], marker.value);
     });
   });
 
@@ -183,8 +183,8 @@ void main() {
       final h = Harness();
       await h.start();
       h.server.requests.clear();
-      h.server.intercept = (method, path, body) =>
-          path.endsWith('/opened') ? FakeServer.error(401, 'unauthorized') : null;
+      h.server.intercept =
+          (method, path, body) => path.endsWith('/opened') ? FakeServer.error(401, 'unauthorized') : null;
       h.messaging.opened.add(DakNotification.fromData({'_dak_id': 'm1'}));
       await settle();
       expect(h.server.calls.where((c) => c == 'POST devices'), hasLength(1));
@@ -241,14 +241,14 @@ void main() {
       final c = client(h, math.Random(1));
       await c.start();
       await c.firstSync;
-      h.server.intercept = (_, __, ___) => http.Response('{"error":{"code":"rate_limited","message":""}}', 429,
-          headers: {'retry-after': '120'});
+      h.server.intercept = (_, __, ___) =>
+          http.Response('{"error":{"code":"rate_limited","message":""}}', 429, headers: {'retry-after': '120'});
       await c.setTags({'a': '1'});
       h.server.intercept = null;
       final before = h.server.requests.length;
       await c.setTags({'b': '2'});
       expect(h.server.requests.length, before, reason: 'the server asked for two minutes');
-      expect(jsonDecode(h.storage.value!)['tags'], {'a': '1', 'b': '2'});
+      expect((jsonDecode(h.storage.value!) as Map<String, Object?>)['tags'], {'a': '1', 'b': '2'});
 
       h.now = h.now.add(const Duration(minutes: 3));
       await c.flush();

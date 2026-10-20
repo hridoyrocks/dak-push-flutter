@@ -4,8 +4,9 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:dak_push/dak_push.dart';
 import 'package:dak_push/src/background.dart';
-import 'package:dak_push/src/client.dart' show kDakSdkVersion;
+import 'package:dak_push/src/client.dart' show kDakSdkVersion, receiptToken;
 import 'package:dak_push/src/messaging.dart';
+import 'package:dak_push/src/storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -130,7 +131,9 @@ void main() {
       await reportDelivery({'_dak_id': 'm9', 'type': 'x'}, storage: h.storage, client: client);
       expect(sent.single.url.toString(), 'https://push.test/v1/apps/app-1/devices/dev-1/delivered');
       expect(sent.single.headers['Authorization'], startsWith('Device secret-'));
-      expect(jsonDecode(sent.single.body), {'message_ids': ['m9']});
+      expect(jsonDecode(sent.single.body), {
+        'message_ids': ['m9']
+      });
       expect(h.storage.receipts, isEmpty);
 
       // Pushes from other services are ignored.
@@ -154,7 +157,8 @@ void main() {
 
     test('before the first registration the receipt waits too', () async {
       final storage = MemoryDakStorage();
-      await reportDelivery({'_dak_id': 'early'}, storage: storage, client: MockClient((_) async => http.Response('', 204)));
+      await reportDelivery({'_dak_id': 'early'},
+          storage: storage, client: MockClient((_) async => http.Response('', 204)));
       expect(storage.receipts, ['early']);
       final h = Harness(storage: storage);
       await h.start();
@@ -299,7 +303,11 @@ void main() {
         'token': 'fcm-token-1',
         'tags': {'level': 'b2'},
         'subscribed': true,
-        'reported': {'token': 'fcm-token-1', 'platform': 'android', 'tags': {'level': 'b2'}},
+        'reported': {
+          'token': 'fcm-token-1',
+          'platform': 'android',
+          'tags': {'level': 'b2'}
+        },
         'last_seen_sent': DateTime(2026, 10, 20, 11).toIso8601String(),
         'opens': ['old-open'],
       });

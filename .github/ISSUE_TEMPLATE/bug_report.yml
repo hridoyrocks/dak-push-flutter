@@ -1,0 +1,55 @@
+name: Bug report
+description: Something in dak_push does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security problems go to the [private report form](https://github.com/hridoyrocks/dak-push-flutter/security/advisories/new), not here.
+        Remove secrets before you paste anything: device secret, REST API key, identity secret, auth hashes.
+  - type: input
+    id: version
+    attributes:
+      label: dak_push version
+      description: The tag or commit in your pubspec.lock.
+      placeholder: v0.3.0
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      multiple: true
+      options:
+        - Android
+        - iOS
+        - iOS notification service extension
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Output of `flutter --version`, your firebase_messaging version, and the phone and OS version.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest code or message payload that shows it.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: With `DakOptions(debugLogs: true)` in a debug build.
+      render: text

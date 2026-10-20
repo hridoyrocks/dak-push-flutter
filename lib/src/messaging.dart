@@ -1,12 +1,13 @@
 import 'dart:async';
 
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter/foundation.dart';
+import 'package:meta/meta.dart';
 
 import 'notification.dart';
 
 /// What the server sends pushes to: an FCM registration token, or (with
 /// firebase_messaging 17+) a Firebase Installation ID.
+@internal
 class DakPushToken {
   const DakPushToken(this.value, {this.type = 'token'});
 
@@ -27,6 +28,7 @@ class DakPushToken {
 
 /// The parts of Firebase Messaging the SDK uses, behind an interface so the
 /// SDK can be tested without Firebase.
+@internal
 abstract class DakMessaging {
   /// The current push target, or null if FCM has none yet.
   Future<DakPushToken?> getPushToken();
@@ -114,7 +116,9 @@ String? actionIdentifierOf(dynamic message) {
   }
 }
 
+/// [DakMessaging] on firebase_messaging 15, 16 and 17.
 class FirebaseDakMessaging implements DakMessaging {
+  /// Creates the Firebase messaging; [useFid] picks FIDs over tokens on 17.
   FirebaseDakMessaging({this.useFid = true});
 
   /// Use Firebase Installation IDs when firebase_messaging has them (17+).
@@ -122,6 +126,7 @@ class FirebaseDakMessaging implements DakMessaging {
 
   FirebaseMessaging get _fm => FirebaseMessaging.instance;
 
+  /// Reads Firebase's [RemoteMessage] as a [DakNotification].
   static DakNotification convert(RemoteMessage m) => DakNotification.fromData(
         m.data,
         title: m.notification?.title,

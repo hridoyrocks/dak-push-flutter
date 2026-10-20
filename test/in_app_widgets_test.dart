@@ -75,7 +75,7 @@ void main() {
         'body': 'আজকের topic: Travel',
         'background_color': '#FFFDE7',
         'buttons': [
-          button('go', {'type': 'deep_link', 'url': 'amarpartner://travel'}),
+          button('go', {'type': 'deep_link', 'url': 'example://travel'}),
           button('later', {'type': 'dismiss'}),
         ],
       }),
@@ -91,7 +91,7 @@ void main() {
     await tester.tap(find.text('Button go'));
     await tester.pumpAndSettle();
     expect(find.text('স্বাগতম'), findsNothing);
-    expect(app.h.clicks.single.toString(), 'DakInAppClick(m, go, deep_link amarpartner://travel)');
+    expect(app.h.clicks.single.toString(), 'DakInAppClick(m, go, deep_link example://travel)');
     expect(await app.events(), ['impression m', 'click m go']);
   });
 
@@ -123,8 +123,14 @@ void main() {
       inAppMessage('c', layout: 'card', content: {
         'title': 'Level',
         'buttons': [
-          button('b1', {'type': 'tags', 'tags': {'level': 'b1'}}),
-          button('b2', {'type': 'tags', 'tags': {'level': 'b2'}}),
+          button('b1', {
+            'type': 'tags',
+            'tags': {'level': 'b1'}
+          }),
+          button('b2', {
+            'type': 'tags',
+            'tags': {'level': 'b2'}
+          }),
           button('custom', {'type': 'custom'}),
         ],
       }),
@@ -149,7 +155,9 @@ void main() {
         'title': 'Full',
         'body': 'Screen',
         'close_button': false,
-        'buttons': [button('ok', {'type': 'dismiss'})],
+        'buttons': [
+          button('ok', {'type': 'dismiss'})
+        ],
       }),
     ]);
     expect(find.byKey(const Key('dak-in-app-fullscreen')), findsOneWidget);
@@ -208,7 +216,7 @@ void main() {
       inAppMessage('t', layout: 'banner_top', content: {
         'title': 'New message',
         'body': 'From Rahim',
-        'click_action': {'type': 'deep_link', 'url': 'amarpartner://inbox'},
+        'click_action': {'type': 'deep_link', 'url': 'example://inbox'},
       }),
     ]);
     expect(find.byKey(const Key('dak-in-app-banner_top')), findsOneWidget);
@@ -222,7 +230,7 @@ void main() {
     await tester.tap(find.text('From Rahim'));
     await tester.pumpAndSettle();
     expect(find.text('New message'), findsNothing);
-    expect(app.h.clicks.single.toString(), 'DakInAppClick(t, null, deep_link amarpartner://inbox)');
+    expect(app.h.clicks.single.toString(), 'DakInAppClick(t, null, deep_link example://inbox)');
     expect(await app.events(), ['impression t', 'click t']);
   });
 
@@ -257,12 +265,16 @@ void main() {
     final app = await pumpApp(tester, [
       inAppMessage('themed', priority: 1, content: {
         'title': 'Themed',
-        'buttons': [button('x', {'type': 'dismiss'})],
+        'buttons': [
+          button('x', {'type': 'dismiss'})
+        ],
       }),
       inAppMessage('coloured', content: {
         'title': 'Coloured',
         'title_color': '#112233',
-        'buttons': [button('y', {'type': 'dismiss'}, bg: '#FF0000', fg: '#80FFFFFF')],
+        'buttons': [
+          button('y', {'type': 'dismiss'}, bg: '#FF0000', fg: '#80FFFFFF')
+        ],
       }),
     ]);
     final scheme = Theme.of(tester.element(find.text('Themed'))).colorScheme;
@@ -281,7 +293,8 @@ void main() {
     expect(style.foregroundColor!.resolve({}), const Color(0x80FFFFFF));
   });
 
-  testWidgets('images: loaded first; a failed one is left out, or the message skipped if it is only an image', (tester) async {
+  testWidgets('images: loaded first; a failed one is left out, or the message skipped if it is only an image',
+      (tester) async {
     final loaded = <String>[];
     var works = false;
     final app = await pumpApp(
@@ -415,7 +428,9 @@ void main() {
       addTearDown(field.dispose);
       final app = await pumpApp(
         tester,
-        [inAppMessage('m', frequency: {'type': 'every_session'})],
+        [
+          inAppMessage('m', frequency: {'type': 'every_session'})
+        ],
         home: Scaffold(body: TextField(focusNode: field)),
       );
       expect(find.text('Title m'), findsOneWidget);
@@ -471,7 +486,10 @@ void main() {
       expect(tester.getSemantics(close), containsSemantics(label: 'Close', isButton: true));
       expect(
         find.byWidgetPredicate((w) =>
-            w is Semantics && w.properties.scopesRoute == true && w.properties.namesRoute == true && w.properties.label == 'Title m'),
+            w is Semantics &&
+            w.properties.scopesRoute == true &&
+            w.properties.namesRoute == true &&
+            w.properties.label == 'Title m'),
         findsOneWidget,
       );
       await tester.tap(find.byKey(const Key('dak-in-app-close')));
@@ -490,7 +508,8 @@ void main() {
     });
 
     testWidgets('I8: no auto-dismiss for screen reader users', (tester) async {
-      tester.platformDispatcher.accessibilityFeaturesTestValue = const FakeAccessibilityFeatures(accessibleNavigation: true);
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(accessibleNavigation: true);
       addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
       await pumpApp(tester, [
         inAppMessage('t', layout: 'banner_top', content: {'title': 'Stays', 'auto_dismiss_seconds': 3}),
@@ -502,7 +521,9 @@ void main() {
     testWidgets('I10: images are decoded at the size they are drawn', (tester) async {
       await pumpApp(
         tester,
-        [inAppMessage('m', content: {'title': 'T', 'image_url': 'https://cdn.test/big.png'})],
+        [
+          inAppMessage('m', content: {'title': 'T', 'image_url': 'https://cdn.test/big.png'})
+        ],
         imageLoader: (_, __) async => true,
       );
       final image = tester.widget<Image>(find.byKey(const Key('dak-in-app-image'))).image;
@@ -563,8 +584,9 @@ void main() {
     testWidgets('I15: one curve for the view, not one per build', (tester) async {
       await pumpApp(tester, [inAppMessage('m')]);
       Animation<double> opacity() => tester
-          .widget<FadeTransition>(
-              find.descendant(of: find.byKey(const Key('dak-in-app-modal')), matching: find.byType(FadeTransition)).first)
+          .widget<FadeTransition>(find
+              .descendant(of: find.byKey(const Key('dak-in-app-modal')), matching: find.byType(FadeTransition))
+              .first)
           .opacity;
       final first = opacity();
       tester.view.physicalSize = tester.view.physicalSize * 0.9;
