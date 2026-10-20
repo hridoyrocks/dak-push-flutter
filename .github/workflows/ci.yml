@@ -167,3 +167,48 @@ jobs:
       - name: Build for the simulator
         working-directory: example
         run: flutter build ios --simulator --no-codesign
+
+  app-ios-spm:
+    # A new app outside this repository that installs dak_push from git, the
+    # way apps do (pub puts it in .pub-cache/git/dak-push-flutter-<commit>),
+    # built with Swift Package Manager.
+    name: App with dak_push from git (iOS simulator, Swift Package Manager)
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: dak-push-flutter
+          # pub clones the repository, which git cannot do from a shallow one.
+          fetch-depth: 0
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          # firebase_core 5 and firebase_messaging 17 import the FlutterFramework
+          # Swift package, which Flutter 3.35 does not generate.
+          flutter-version: '3.47.7'
+          cache: true
+      - run: flutter config --enable-swift-package-manager
+      - name: Create the app
+        run: |
+          sdk="$GITHUB_WORKSPACE/dak-push-flutter"
+          git -C "$sdk" checkout -q -B under-test
+          sha=$(git -C "$sdk" rev-parse HEAD)
+          flutter create --platforms ios --org com.example --project-name dak_app "$RUNNER_TEMP/dak_app"
+          cd "$RUNNER_TEMP/dak_app"
+          sed -i '' -E 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]+;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/' ios/Runner.xcodeproj/project.pbxproj
+          flutter pub add "dak_push:{\"git\":{\"url\":\"$sdk\",\"ref\":\"$sha\"}}"
+          cat > lib/main.dart <<'DART'
+          import 'package:dak_push/dak_push.dart';
+          import 'package:flutter/material.dart';
+
+          Future<void> main() async {
+            WidgetsFlutterBinding.ensureInitialized();
+            await Dak.init(appId: 'app', baseUrl: 'https://push.example.com');
+            runApp(const MaterialApp(builder: Dak.inAppBuilder, home: SizedBox()));
+          }
+          DART
+          rm -rf test
+          grep -A1 '"name": "dak_push"' .dart_tool/package_config.json
+      - name: Build for the simulator
+        working-directory: ${{ runner.temp }}/dak_app
+        run: flutter build ios --simulator --no-codesign
