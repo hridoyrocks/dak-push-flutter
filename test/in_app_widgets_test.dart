@@ -75,7 +75,7 @@ void main() {
         'body': 'আজকের topic: Travel',
         'background_color': '#FFFDE7',
         'buttons': [
-          button('go', {'type': 'deep_link', 'url': 'amarpartner://travel'}),
+          button('go', {'type': 'deep_link', 'url': 'example://travel'}),
           button('later', {'type': 'dismiss'}),
         ],
       }),
@@ -91,7 +91,7 @@ void main() {
     await tester.tap(find.text('Button go'));
     await tester.pumpAndSettle();
     expect(find.text('স্বাগতম'), findsNothing);
-    expect(app.h.clicks.single.toString(), 'DakInAppClick(m, go, deep_link amarpartner://travel)');
+    expect(app.h.clicks.single.toString(), 'DakInAppClick(m, go, deep_link example://travel)');
     expect(await app.events(), ['impression m', 'click m go']);
   });
 
@@ -208,7 +208,7 @@ void main() {
       inAppMessage('t', layout: 'banner_top', content: {
         'title': 'New message',
         'body': 'From Rahim',
-        'click_action': {'type': 'deep_link', 'url': 'amarpartner://inbox'},
+        'click_action': {'type': 'deep_link', 'url': 'example://inbox'},
       }),
     ]);
     expect(find.byKey(const Key('dak-in-app-banner_top')), findsOneWidget);
@@ -222,7 +222,7 @@ void main() {
     await tester.tap(find.text('From Rahim'));
     await tester.pumpAndSettle();
     expect(find.text('New message'), findsNothing);
-    expect(app.h.clicks.single.toString(), 'DakInAppClick(t, null, deep_link amarpartner://inbox)');
+    expect(app.h.clicks.single.toString(), 'DakInAppClick(t, null, deep_link example://inbox)');
     expect(await app.events(), ['impression t', 'click t']);
   });
 

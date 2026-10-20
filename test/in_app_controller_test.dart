@@ -302,8 +302,8 @@ void main() {
 
   test('clicks: report, close, run the action, tell the app', () async {
     final buttons = [
-      {'id': 'go', 'text': 'Go', 'action': {'type': 'deep_link', 'url': 'amarpartner://challenge'}},
-      {'id': 'web', 'text': 'Web', 'action': {'type': 'url', 'url': 'https://amarpartner.app/x'}},
+      {'id': 'go', 'text': 'Go', 'action': {'type': 'deep_link', 'url': 'example://challenge'}},
+      {'id': 'web', 'text': 'Web', 'action': {'type': 'url', 'url': 'https://example.com/x'}},
       {'id': 'b2', 'text': 'B2', 'action': {'type': 'tags', 'tags': {'level': 'b2', 'old': ''}}},
     ];
     h.server.inApp = [
@@ -325,12 +325,12 @@ void main() {
     h.display();
     await c.click(tap);
     expect(h.clicks.map((x) => '${x.messageId} ${x.buttonId} ${x.actionType} ${x.url}'), [
-      'm-go go deep_link amarpartner://challenge',
-      'm-web web url https://amarpartner.app/x',
+      'm-go go deep_link example://challenge',
+      'm-web web url https://example.com/x',
       'm-b2 b2 tags null',
       'tap null custom null',
     ]);
-    expect(h.opened, [Uri.parse('https://amarpartner.app/x')]);
+    expect(h.opened, [Uri.parse('https://example.com/x')]);
     expect(h.tagsSet, [
       {'level': 'b2', 'old': ''}
     ]);

@@ -102,6 +102,9 @@ Correctness and robustness fixes from a review of the SDK.
 - README: Requirements, platform setup and troubleshooting; a guide for
   [migrating from OneSignal](doc/migrating-from-onesignal.md); SECURITY.md and
   CONTRIBUTING.md.
+- API docs for every public member. `DakInAppCondition` and
+  `DakInAppFrequency` are exported: they are the types of
+  `DakInAppMessage.triggers` and `frequency`.
 
 ## 0.3.1 - 2026-10-21
 

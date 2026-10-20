@@ -57,7 +57,8 @@ dak_push follows [semantic versioning](https://semver.org). Below 1.0, a
 breaking change raises the minor version (0.3 → 0.4) and anything else the
 patch version.
 
-The version is written in four places, and a test checks that they match:
+The version is written in four places. `test/version_test.dart` checks that
+they match, and that CHANGELOG.md has a dated section for it:
 
 - `pubspec.yaml` (`version`)
 - `lib/src/client.dart` (`kDakSdkVersion`, which the server sees)
