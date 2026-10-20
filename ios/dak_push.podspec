@@ -8,7 +8,7 @@ badge, and reads which notification button was tapped.
                        DESC
   s.homepage         = 'https://github.com/hridoyrocks/dak-push-flutter'
   s.license          = { :file => '../LICENSE' }
-  s.author           = { 'Dak' => 'support@cdielts.org' }
+  s.author           = 'Md Shoriful Haque Hridoy'
   s.source           = { :path => '.' }
   s.source_files     = 'dak_push/Sources/dak_push/**/*.swift'
   s.resource_bundles = { 'dak_push_privacy' => ['dak_push/Sources/dak_push/PrivacyInfo.xcprivacy'] }
