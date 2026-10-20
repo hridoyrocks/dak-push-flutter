@@ -157,6 +157,11 @@ jobs:
             flutter: '3.47.7'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # With Swift Package Manager, Flutter 3.47 names a path dependency's
+          # package after its folder, and Xcode then wants that to be the
+          # plugin's name; a checkout in dak-push-flutter/ fails to resolve.
+          path: dak_push
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           flutter-version: ${{ matrix.flutter || env.FLUTTER_VERSION }}
@@ -165,7 +170,7 @@ jobs:
         if: matrix.deps == 'Swift Package Manager'
         run: flutter config --enable-swift-package-manager
       - name: Build for the simulator
-        working-directory: example
+        working-directory: dak_push/example
         run: flutter build ios --simulator --no-codesign
 
   app-ios-spm:

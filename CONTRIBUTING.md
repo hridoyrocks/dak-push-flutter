@@ -18,6 +18,11 @@ flutter test
 ```
 
 The [example app](example/README.md) runs the SDK against a real Dak server.
+To build it with Swift Package Manager, clone the repository into a folder
+named `dak_push` (`git clone https://github.com/hridoyrocks/dak-push-flutter.git dak_push`):
+Flutter names the example's path dependency after the folder, and Xcode
+rejects a name that is not the plugin's. Apps that install dak_push from
+git or pub.dev are not affected.
 `flutterfire configure` changes tracked files in `example/` (Gradle settings,
 the Xcode project); do not commit those changes or your Firebase config.
 
