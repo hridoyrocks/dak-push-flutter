@@ -5,6 +5,7 @@ class DakNotification {
     this.title,
     this.body,
     this.url,
+    this.imageUrl,
     this.data = const {},
   });
 
@@ -15,6 +16,9 @@ class DakNotification {
 
   /// The deep link given when the message was sent (`url`), if any.
   final String? url;
+
+  /// The notification's image (`image` when it was sent), if any.
+  final String? imageUrl;
 
   /// The message's data, without Dak's own `_dak_` keys.
   final Map<String, String> data;
@@ -27,6 +31,7 @@ class DakNotification {
     Map<String, dynamic> raw, {
     String? title,
     String? body,
+    String? imageUrl,
   }) {
     final data = <String, String>{};
     raw.forEach((k, v) {
@@ -37,6 +42,7 @@ class DakNotification {
       url: raw[urlKey]?.toString(),
       title: title,
       body: body,
+      imageUrl: imageUrl,
       data: data,
     );
   }

@@ -34,6 +34,7 @@ class FirebaseDakMessaging implements DakMessaging {
         m.data,
         title: m.notification?.title,
         body: m.notification?.body,
+        imageUrl: m.notification?.android?.imageUrl ?? m.notification?.apple?.imageUrl,
       );
 
   static bool _allowed(AuthorizationStatus s) =>

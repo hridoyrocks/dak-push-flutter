@@ -193,9 +193,16 @@ void main() {
     await h.client.start();
     final got = <DakNotification>[];
     h.client.onForeground.listen(got.add);
-    h.messaging.foreground.add(const DakNotification(title: 'Hi', body: 'there'));
+    h.messaging.foreground.add(DakNotification.fromData(
+      {'_dak_id': 'm1', 'type': 'new_follower'},
+      title: 'Hi',
+      body: 'there',
+      imageUrl: 'https://cdn.example.com/a.png',
+    ));
     await settle();
     expect(got.single.title, 'Hi');
+    expect(got.single.imageUrl, 'https://cdn.example.com/a.png');
+    expect(got.single.data, {'type': 'new_follower'});
   });
 
   test('without a token nothing is registered until one arrives', () async {
