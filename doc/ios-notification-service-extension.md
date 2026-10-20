@@ -45,6 +45,11 @@ and nothing else). The device secret stays in the app's keychain.
    (Or delete it and set `NSExtensionPrincipalClass` in the extension's
    Info.plist to `$(PRODUCT_MODULE_NAME).DakNotificationService`.)
 
+   Copy `ios_extension/PrivacyInfo.xcprivacy` too and add it to the extension
+   target. App Store Connect asks each target that uses `UserDefaults` for its
+   own privacy manifest (ITMS-91053); the plugin's manifest covers only the
+   app.
+
 4. **Info.plist of the extension.** Add the App Group:
 
    ```xml
@@ -79,13 +84,34 @@ and nothing else). The device secret stays in the app's keychain.
 - In Xcode → Debug → Attach to Process → `DakNotificationService` you can
   debug the extension while sending a push.
 
+## Updating dak_push
+
+The extension is a copy, so it does not update with the package. Copy
+`DakNotificationService.swift` again after updating dak_push. Its
+`schemaVersion` tells the plugin which shared keys it knows: debug builds log a
+warning in Xcode's console when the copy is older than the plugin expects, and
+the extension logs an error when the app is newer.
+
+## When it does not work
+
+- The extension logs setup problems to Console.app (filter on subsystem
+  `dak_push`): no `DakAppGroup` in its Info.plist, an App Group missing from
+  its entitlements, or an app that has not shared its settings yet.
+- When the App Group is missing from the Runner target, debug builds of the app
+  print `dak: the notification service extension cannot report deliveries`.
+- Receipts the extension cannot send (no network) are kept in the App Group;
+  the app sends them on its next start or resume.
+
 ## Notes
 
 - The extension has about 30 seconds per push. It reports the delivery and
   downloads the image at the same time. The download stops after 15 seconds
   or 10 MB, and the push then shows without the picture.
 - Buttons are made as categories named `dak_…`. The extension keeps the app's
-  own categories and at most 30 of Dak's.
+  own categories and the 30 of Dak's used most recently, one push at a time, and
+  shows the push once iOS has its category. If another plugin replaces all
+  categories (flutter_local_notifications does), the app puts Dak's back when it
+  starts or comes back to the foreground.
 - Images must be `https`, and a type iOS can attach (JPEG, PNG, GIF), at most
   10 MB.
 - `Dak.setBadge(n)` and `Dak.clearBadge()` set the badge and the count the

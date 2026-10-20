@@ -26,9 +26,19 @@ abstract class DakNative {
   /// iOS: sets the app icon badge (and the count the extension adds to).
   Future<void> setBadge(int count, {String? appGroup});
 
-  /// Android: shows a Dak notification with its buttons (for a message that
-  /// arrived while the app was open).
-  Future<void> show(Map<String, String> data);
+  /// Android: shows a Dak notification (with its buttons) from its data and
+  /// `_dak_title`, `_dak_body`, `_dak_image`. False when nothing was shown
+  /// (no text, notifications off, or not Android).
+  Future<bool> show(Map<String, String> data);
+
+  /// The SDK's own folder: kept out of backups and deleted with the app.
+  /// Null when there is none (tests, other platforms).
+  Future<String?> storageDirectory();
+
+  /// iOS: receipts the notification service extension could not send, kept
+  /// in the App Group until [removeExtensionReceipts].
+  Future<List<String>> extensionReceipts(String appGroup);
+  Future<void> removeExtensionReceipts(String appGroup, List<String> messageIds);
 }
 
 class MethodChannelDakNative implements DakNative {
@@ -77,7 +87,18 @@ class MethodChannelDakNative implements DakNative {
       _call<void>('setBadge', {'count': count, 'app_group': appGroup});
 
   @override
-  Future<void> show(Map<String, String> data) => _call<void>('show', {'data': data});
+  Future<bool> show(Map<String, String> data) async => await _call<bool>('show', {'data': data}) ?? false;
+
+  @override
+  Future<String?> storageDirectory() => _call<String>('storageDirectory');
+
+  @override
+  Future<List<String>> extensionReceipts(String appGroup) async =>
+      (await _call<List<Object?>>('extensionReceipts', {'app_group': appGroup}))?.whereType<String>().toList() ?? [];
+
+  @override
+  Future<void> removeExtensionReceipts(String appGroup, List<String> messageIds) =>
+      _call<void>('removeExtensionReceipts', {'app_group': appGroup, 'message_ids': messageIds});
 }
 
 /// No native code (tests).
@@ -100,5 +121,14 @@ class NoDakNative implements DakNative {
   Future<void> setBadge(int count, {String? appGroup}) async {}
 
   @override
-  Future<void> show(Map<String, String> data) async {}
+  Future<bool> show(Map<String, String> data) async => false;
+
+  @override
+  Future<String?> storageDirectory() async => null;
+
+  @override
+  Future<List<String>> extensionReceipts(String appGroup) async => const [];
+
+  @override
+  Future<void> removeExtensionReceipts(String appGroup, List<String> messageIds) async {}
 }

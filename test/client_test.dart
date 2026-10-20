@@ -16,10 +16,14 @@ void main() {
       'platform': 'android',
       'app_version': '8.0.2+533',
       'os_version': '14',
-      'sdk_version': '0.3.1',
+      'sdk_version': '0.4.0',
       'language': 'bn',
       'push_permission': false,
       'subscribed': true,
+      // The whole state, so a row taken over for this token keeps nothing of
+      // an earlier install.
+      'external_id': null,
+      'utc_offset_minutes': null,
       'tags': <String, dynamic>{},
     });
     expect(h.client.deviceId, 'dev-1');

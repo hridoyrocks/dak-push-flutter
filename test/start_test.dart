@@ -189,9 +189,19 @@ void main() {
     });
 
     test('a write before any read still replaces an old item', () async {
+      final keychain = FakeKeychain()..items['dak_push_state'] = (value: 'old', legacy: true);
+      await SecureDakStorage(keychain: keychain).write('new');
+      expect(keychain.items['dak_push_state'], (value: 'new', legacy: false));
+    });
+
+    test('receipts 0.3.0 kept as one list are read with the new ones, then removed', () async {
       final keychain = FakeKeychain()..items['dak_push_receipts'] = (value: '["a"]', legacy: true);
-      await SecureDakStorage(keychain: keychain).writeReceipts('["a","b"]');
-      expect(keychain.items['dak_push_receipts'], (value: '["a","b"]', legacy: false));
+      final storage = SecureDakStorage(keychain: keychain);
+      await storage.addReceipt('b');
+      expect(keychain.items['dak_push_state.receipt.b'], (value: '1', legacy: false));
+      expect((await storage.readReceipts())..sort(), ['a', 'b']);
+      await storage.removeReceipts(['a', 'b']);
+      expect(keychain.items, isEmpty);
     });
 
     test('a locked keychain throws, so the client never saves over what it could not read', () async {

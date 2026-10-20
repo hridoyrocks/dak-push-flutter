@@ -27,6 +27,7 @@ class DakOptions {
     this.iosAppGroup,
     this.useFid = true,
     this.sessionTimeout = const Duration(minutes: 5),
+    this.inAppUrlSchemes = const {'https', 'http'},
   });
 
   /// iOS only: let the system show notifications while the app is open.
@@ -60,6 +61,23 @@ class DakOptions {
   /// In-app messages: coming back after this long in the background starts a
   /// new session (session_count, every_session).
   final Duration sessionTimeout;
+
+  /// In-app messages: the URL schemes a `url` action may open. Others (like
+  /// intent: or file:) are not opened; the click still reaches
+  /// [Dak.onInAppClick].
+  final Set<String> inAppUrlSchemes;
+}
+
+/// Runs a start-up once: overlapping callers share one run, and a run that
+/// failed can be tried again.
+@visibleForTesting
+class DakOnce {
+  Future<void>? _run;
+
+  Future<void> call(Future<void> Function() start) => _run ??= start().then((_) {}, onError: (Object e, StackTrace s) {
+        _run = null;
+        Error.throwWithStackTrace(e, s);
+      });
 }
 
 /// The SDK's entry point.
@@ -74,6 +92,10 @@ class Dak {
   static DakInAppController? _inApp;
   static _Lifecycle? _lifecycle;
   static final DakNative _native = MethodChannelDakNative();
+  static final _once = DakOnce();
+
+  /// Where 0.3 kept the in-app cache (now a file in the SDK's folder).
+  static const _legacyInAppKey = 'dak_push_in_app';
 
   static DakClient get _c {
     final c = _client;
@@ -87,9 +109,10 @@ class Dak {
     return c;
   }
 
-  /// Starts the SDK. Safe to call more than once. Initializes Firebase if
-  /// the app has not. Call it before runApp, so the back button closes
-  /// in-app messages first.
+  /// Starts the SDK. Safe to call more than once (later calls wait for the
+  /// first). Initializes Firebase if the app has not. Call it before runApp,
+  /// so the back button closes in-app messages first. [baseUrl] must be
+  /// https.
   ///
   /// It returns once the saved state and the notification that opened the
   /// app are read; getting the push token and registering the device go on
@@ -99,8 +122,11 @@ class Dak {
     required String appId,
     required String baseUrl,
     DakOptions options = const DakOptions(),
-  }) async {
-    if (_client != null) return;
+  }) =>
+      _once(() => _init(appId, baseUrl, options));
+
+  static Future<void> _init(String appId, String baseUrl, DakOptions options) async {
+    final api = DakApi(baseUrl: baseUrl, appId: appId);
     WidgetsFlutterBinding.ensureInitialized();
     if (Firebase.apps.isEmpty) await Firebase.initializeApp();
     if (options.handleBackgroundMessages) {
@@ -110,8 +136,16 @@ class Dak {
     if (options.showInForegroundOnIOS && defaultTargetPlatform == TargetPlatform.iOS) {
       await messaging.showInForegroundOnIOS(true);
     }
-    final api = DakApi(baseUrl: baseUrl, appId: appId);
     final log = options.debugLogs && kDebugMode ? debugPrint : null;
+    // Setup mistakes (a wrong App Group) are shown in debug builds even
+    // without debugLogs.
+    final warn = kDebugMode ? debugPrint : null;
+    String? dir;
+    try {
+      dir = await _native.storageDirectory();
+    } catch (e) {
+      log?.call('dak: no folder for the SDK: $e');
+    }
     final client = DakClient(
       api: api,
       messaging: messaging,
@@ -120,26 +154,43 @@ class Dak {
       native: _native,
       shareTimezoneOffset: options.shareTimezoneOffset,
       iosAppGroup: options.iosAppGroup,
+      installMarker: dir == null ? null : FileDakStateStore('$dir/install'),
       log: log,
+      warn: warn,
     );
+    // The in-app cache holds nothing secret and changes with every event: a
+    // plain file, deleted with the app.
+    final DakStateStore inAppStore =
+        dir == null ? SecureDakStorage(key: _legacyInAppKey) : FileDakStateStore('$dir/in_app.json');
     final inApp = DakInAppController(
       api: api,
-      storage: SecureDakStorage(key: 'dak_push_in_app'),
+      storage: inAppStore,
       credentials: () => client.credentials,
       setTags: client.setTags,
       openUrl: (url) => launchUrl(url, mode: LaunchMode.externalApplication),
+      urlSchemes: options.inAppUrlSchemes,
       sessionTimeout: options.sessionTimeout,
       appState: () => WidgetsBinding.instance.lifecycleState,
       log: log,
     );
     _client = client;
     _inApp = inApp;
+    dakInAppControllers.value = inApp;
     _lifecycle = _Lifecycle(client, inApp);
     WidgetsBinding.instance.addObserver(_lifecycle!);
     client.onRegistered.listen((_) => unawaited(inApp.onRegistered()));
     // In-app messages start from the cache as soon as the saved state is
     // read, without waiting for the network.
-    unawaited(client.loaded.then((_) => inApp.start()));
+    unawaited(client.loaded.then((_) async {
+      if (dir != null) {
+        final legacy = SecureDakStorage(key: _legacyInAppKey);
+        await moveLegacyState(readOld: legacy.read, deleteOld: legacy.delete, to: inAppStore, keep: !client.reinstalled);
+      }
+    }).catchError((Object e) {
+      log?.call('dak: could not move the old in-app cache: $e');
+    }).then((_) => inApp.start()).catchError((Object e) {
+      log?.call('dak: in-app messages did not start: $e');
+    }));
     await client.start();
   }
 
@@ -172,8 +223,24 @@ class Dak {
   static Future<void> clearBadge() => _c.setBadge(0);
 
   /// Android: shows a message that arrived while the app was open the way
-  /// it would have been shown in the background, buttons included.
-  static Future<void> showNotification(DakNotification notification) => _native.show(notification.raw);
+  /// it would have been shown in the background, buttons and image
+  /// included. Returns false when nothing was shown: on iOS (use
+  /// [DakOptions.showInForegroundOnIOS]), with notifications turned off, or
+  /// for a message without title and body.
+  static Future<bool> showNotification(DakNotification notification) async {
+    if (defaultTargetPlatform != TargetPlatform.android) return false;
+    return _native.show(showData(notification));
+  }
+
+  /// What the plugin needs to show [n]: its data, and its title, body and
+  /// image, which FCM keeps outside the data for messages without buttons.
+  @visibleForTesting
+  static Map<String, String> showData(DakNotification n) => {
+        ...n.raw,
+        if (n.title != null) '_dak_title': n.title!,
+        if (n.body != null) '_dak_body': n.body!,
+        if (n.imageUrl != null) '_dak_image': n.imageUrl!,
+      };
 
   /// Taps on notifications while the app was running in the background.
   /// [DakNotification.actionId] tells which button was tapped, if one was.

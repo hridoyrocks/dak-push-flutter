@@ -11,22 +11,35 @@ import 'model.dart';
 
 typedef DakCredentials = ({String deviceId, String secret});
 
+/// The controller `Dak.init` made, for hosts and blocks built before it.
+final dakInAppControllers = ValueNotifier<DakInAppController?>(null);
+
 final _triggerKey = RegExp(r'^[A-Za-z0-9_.:-]{1,64}$');
 
 class _Local {
-  _Local({this.shown = 0, this.last, this.session = 0});
+  _Local({this.shown = 0, this.last, this.session = 0, this.interrupted = false});
   int shown;
   DateTime? last;
 
   /// The session it was last shown in (for every_session).
   int session;
 
-  Map<String, Object?> toJson() => {'shown': shown, 'last': last?.toIso8601String(), 'session': session};
+  /// Hidden by a pause or block before the user closed it: it comes back
+  /// once, and that is not a new impression.
+  bool interrupted;
+
+  Map<String, Object?> toJson() => {
+        'shown': shown,
+        'last': last?.toIso8601String(),
+        'session': session,
+        if (interrupted) 'interrupted': true,
+      };
 
   static _Local fromJson(Map js) => _Local(
         shown: js['shown'] is num ? (js['shown'] as num).toInt() : 0,
         last: js['last'] is String ? DateTime.tryParse(js['last'] as String) : null,
         session: js['session'] is num ? (js['session'] as num).toInt() : 0,
+        interrupted: js['interrupted'] == true,
       );
 }
 
@@ -40,6 +53,8 @@ class DakInAppController {
     required this.credentials,
     required this.setTags,
     this.openUrl,
+    this.urlSchemes = const {'https', 'http'},
+    this.cacheMaxAge = const Duration(days: 7),
     this.sessionTimeout = const Duration(minutes: 5),
     this.fetchWait = const Duration(seconds: 3),
     this.minFetchInterval = const Duration(minutes: 1),
@@ -53,7 +68,7 @@ class DakInAppController {
   }
 
   final DakApi api;
-  final DakStorage storage;
+  final DakStateStore storage;
 
   /// The device's id and secret, or null before it is registered.
   final DakCredentials? Function() credentials;
@@ -61,6 +76,13 @@ class DakInAppController {
 
   /// Opens `url` actions; null leaves them to the app's onInAppClick.
   final Future<bool> Function(Uri url)? openUrl;
+
+  /// The schemes [openUrl] gets; other URLs are not opened.
+  final Set<String> urlSchemes;
+
+  /// Without a successful fetch for this long, the cached list is not shown:
+  /// it may hold messages the server has stopped.
+  final Duration cacheMaxAge;
 
   /// Back from the background after this long starts a new session.
   final Duration sessionTimeout;
@@ -108,7 +130,8 @@ class DakInAppController {
   bool _sessionDue = false;
   bool _paused = false;
   int _blocks = 0;
-  bool _attached = false;
+  final _hosts = <Object>[];
+  static const _defaultHost = Object();
   bool _pending = false;
   bool _displayed = false;
   final _failed = <String>{};
@@ -121,6 +144,13 @@ class DakInAppController {
   /// The message to show now, or null. Set by the controller, drawn by the
   /// host, which reports back with [didDisplay] or [didFail].
   final current = ValueNotifier<DakInAppMessage?>(null);
+
+  /// The host that draws [current]: the first attached one still in the
+  /// tree, so two hosts never show the same message twice.
+  final activeHost = ValueNotifier<Object?>(null);
+
+  /// A message is on screen (drawn), so the back button closes it.
+  bool get isShowing => current.value != null && _displayed;
 
   Stream<DakInAppClick> get onClick => _clicks.stream;
 
@@ -283,26 +313,43 @@ class DakInAppController {
 
   void _pauseChanged() {
     if (isPaused) {
-      if (current.value != null) {
-        _displayed = false;
-        current.value = null;
-      }
+      _interrupt();
     } else {
       _evaluate();
     }
   }
 
+  /// Takes the message off screen without the user closing it.
+  void _interrupt() {
+    final m = current.value;
+    if (m == null) return;
+    if (_displayed) {
+      (_local[m.id] ??= _Local()).interrupted = true;
+      unawaited(_save());
+    }
+    _displayed = false;
+    current.value = null;
+  }
+
   // ---- host
 
-  void attach() {
-    _attached = true;
+  /// A host is in the tree. Hosts are counted: messages show while at
+  /// least one is attached, drawn by [activeHost].
+  void attach([Object? host]) {
+    final h = host ?? _defaultHost;
+    if (!_hosts.contains(h)) _hosts.add(h);
+    activeHost.value = _hosts.first;
     _evaluate();
   }
 
-  void detach() {
-    _attached = false;
-    _displayed = false;
-    current.value = null;
+  void detach([Object? host]) {
+    final h = host ?? _defaultHost;
+    final wasActive = _hosts.isNotEmpty && identical(_hosts.first, h);
+    if (!_hosts.remove(h) || !wasActive) return;
+    _interrupt();
+    activeHost.value = _hosts.firstOrNull;
+    // The message moves to the next host.
+    _evaluate();
   }
 
   /// The host drew the message: count the impression.
@@ -310,6 +357,13 @@ class DakInAppController {
     if (current.value?.id != m.id || _displayed) return;
     _displayed = true;
     final l = _local[m.id] ??= _Local();
+    l.session = _sessions;
+    if (l.interrupted) {
+      // The same display, back after a pause: counted already.
+      l.interrupted = false;
+      unawaited(_save());
+      return;
+    }
     l.shown++;
     l.last = _now();
     l.session = _sessions;
@@ -342,7 +396,11 @@ class DakInAppController {
           await setTags(action.tags);
         case 'url':
           final url = Uri.tryParse(action.url ?? '');
-          if (url != null && openUrl != null) await openUrl!(url);
+          if (url == null || !urlSchemes.contains(url.scheme.toLowerCase())) {
+            _log('dak: not opening ${action.url}: only ${urlSchemes.join(', ')} URLs are opened');
+          } else if (openUrl != null) {
+            await openUrl!(url);
+          }
       }
     } catch (e) {
       _log('dak: in-app action ${action.type} failed: $e');
@@ -408,15 +466,24 @@ class DakInAppController {
     if (!_started) return;
     final now = _now();
     _scheduleTimer(now);
-    final best = _messages.where((m) => _eligible(m, now)).firstOrNull;
+    final best = _cacheFresh(now) ? _messages.where((m) => _eligible(m, now)).firstOrNull : null;
     if (best == null) return;
     if (current.value != null) {
       if (queue && current.value!.id != best.id) _pending = true;
       return;
     }
-    if (isPaused || !_attached || !_foreground) return;
+    if (isPaused || _hosts.isEmpty || !_foreground) return;
+    // A message back after a pause goes first; what came due meanwhile
+    // follows when it closes.
+    if (_local[best.id]?.interrupted ?? false) _pending = true;
     _displayed = false;
     current.value = best;
+  }
+
+  /// A cache without a fetch time (written by hand) counts as fresh.
+  bool _cacheFresh(DateTime now) {
+    final at = _fetchedAt;
+    return at == null || now.difference(at) <= cacheMaxAge;
   }
 
   bool _eligible(DakInAppMessage m, DateTime now) {
@@ -424,6 +491,7 @@ class DakInAppController {
     if (m.startAt != null && now.isBefore(m.startAt!)) return false;
     if (m.endAt != null && !now.isBefore(m.endAt!)) return false;
     final local = _local[m.id];
+    if (local != null && local.interrupted) return _triggered(m, now);
     final shown = math.max(local?.shown ?? 0, m.shown);
     final last = _later(local?.last, m.lastShownAt);
     final max = m.frequency.maxDisplays;
@@ -436,8 +504,11 @@ class DakInAppController {
       case 'interval':
         if (last != null && now.difference(last) < m.frequency.interval) return false;
     }
-    return m.triggers.isEmpty || m.triggers.any((group) => group.every((c) => _holds(c, now)));
+    return _triggered(m, now);
   }
+
+  bool _triggered(DakInAppMessage m, DateTime now) =>
+      m.triggers.isEmpty || m.triggers.any((group) => group.every((c) => _holds(c, now)));
 
   bool _holds(DakInAppCondition c, DateTime now) {
     switch (c.kind) {
@@ -622,6 +693,7 @@ class DakInAppController {
         shown: (saved?.shown ?? 0) + l.shown,
         last: _later(saved?.last, l.last),
         session: l.session > 0 ? l.session + before : (saved?.session ?? 0),
+        interrupted: l.interrupted || (saved?.interrupted ?? false),
       );
     });
     _installedAt ??= mem.installedAt;
@@ -710,6 +782,8 @@ class DakInAppController {
     _timer?.cancel();
     _eventTimer?.cancel();
     await _clicks.close();
+    if (identical(dakInAppControllers.value, this)) dakInAppControllers.value = null;
     current.dispose();
+    activeHost.dispose();
   }
 }

@@ -43,7 +43,7 @@ await Dak.requestPermission();
 
 // After your own login. authHash comes from your server (see below).
 await Dak.login(user.id, authHash: user.pushAuthHash);
-await Dak.logout();
+await Dak.logout(); // also removes this device's tags
 
 await Dak.setTags({'name': 'Rahim', 'level': 'b2', 'premium': true});
 await Dak.deleteTags(['level']);
@@ -72,12 +72,24 @@ for the saved state and then sync. Taps that come before you listen to
 `login` and `setTags` throw `DakException` only for mistakes the app must fix
 (wrong auth hash, bad tag). Only the refused field is rolled back: an opt-out
 sent with a wrong auth hash still goes through. Network problems never throw:
-changes are saved and sent later, also after an app restart. Refusals from
-syncs nobody awaits (a retry, a token refresh) come on `Dak.onError`:
+changes are saved and sent later, also after an app restart. When the server
+asks the SDK to slow down (`Retry-After`), changes are only saved until then.
+Refusals from syncs nobody awaits (a retry, a token refresh) come on
+`Dak.onError`:
 
 ```dart
 Dak.onError.listen((e) => log('dak refused ${e.field ?? e.code}: ${e.message}'));
 ```
+
+`baseUrl` must be `https` (plain `http` works only for `localhost` and the
+Android emulator's `10.0.2.2`). Lengths are counted in UTF-8 bytes, as the
+server does: a tag value is at most 255 bytes (85 Bangla letters), a user id
+128.
+
+On iOS the keychain keeps the SDK's state after the app is deleted. The SDK
+marks each install with a file that is deleted with the app, so after a
+reinstall it starts over as a new device instead of bringing back the old
+user and tags.
 
 ## Delivered receipts
 
@@ -122,11 +134,14 @@ app; `n.actionId` is the button's id and the server counts taps per button.
   Firebase. With 15 or 16 the SDK reads it from the notification response,
   which needs your `AppDelegate` to be the notification center's delegate
   (`UNUserNotificationCenter.current().delegate = self` in
-  `didFinishLaunchingWithOptions`, before `super`).
+  `didFinishLaunchingWithOptions`, before `super`). Debug builds log a warning
+  when a tap never reached the plugin.
 
 A message that arrives while the app is open is not shown on Android (like
-any FCM message); `Dak.showNotification(n)` shows it with its buttons if you
-want that.
+any FCM message); `await Dak.showNotification(n)` shows it the way it would
+have looked in the background, buttons and image included. It returns false
+when nothing was shown (on iOS, with notifications turned off, or without a
+title and body).
 
 ## Languages
 
@@ -199,6 +214,20 @@ How it works:
   shows without it; an image-only message waits for the next session.
 - Messages this SDK version cannot show (a newer layout, action or trigger) are
   skipped.
+- Without a successful fetch for a week, the cached list is not shown: the
+  server may have stopped those messages since.
+- A message that `pauseInApp` or a `DakInAppBlock` hides before the user closed
+  it comes back afterwards, also for `once` messages; it counts as one
+  impression.
+- `url` actions open only `https` and `http` links
+  (`DakOptions(inAppUrlSchemes: …)` to allow more, such as `mailto`); the click
+  still reaches `onInAppClick`.
+- Modal, card and full-screen messages take the keyboard focus like a dialog
+  (Escape closes them) and give it back. Screen readers announce them as
+  dialogs and banners as they appear; banners do not close by themselves for
+  screen reader users. Layouts follow right-to-left languages.
+- The host can be built before `Dak.init` finishes. With two hosts in the tree
+  the outer one draws the messages.
 
 ## Identity verification
 
