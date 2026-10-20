@@ -22,12 +22,11 @@ Correctness and robustness fixes from a review of the SDK.
   and now shows any message, not only those with buttons.
 - In-app messages: one that `pauseInApp` or `DakInAppBlock` hides before the
   user closed it comes back afterwards, also when its frequency is `once`.
-- For custom implementations only: `DakStorage` keeps background receipts one
-  entry each (`addReceipt`, `readReceipts`, `removeReceipts`, `clear`) instead
-  of `readReceipts`/`writeReceipts`; `DakNative.show` returns `bool`, and
-  `DakNative` has `storageDirectory`, `extensionReceipts` and
-  `removeExtensionReceipts`; `DakKeychain` has `keys()`;
-  `DakInAppController.storage` is a `DakStateStore`.
+- The SDK's internals are no longer exported from
+  `package:dak_push/dak_push.dart`: `DakClient`, `DakMessaging`,
+  `DakPushToken`, `DakNative`, `NoDakNative`, `DakPlatformInfo`, `DakStorage`,
+  `MemoryDakStorage` and `receiptToken`. Apps use `Dak`; these served the
+  SDK's own tests, and their interfaces changed in this release too.
 
 **Client**
 

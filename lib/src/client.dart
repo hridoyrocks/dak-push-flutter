@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:crypto/crypto.dart';
-import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:meta/meta.dart';
 
 import 'api.dart';
 import 'buffered_broadcast.dart';
@@ -56,12 +56,14 @@ String clampUtf8(String s, int max) {
 
 /// hex(sha256(device secret)): what the iOS notification service extension
 /// holds. It can report deliveries and nothing else.
+@internal
 String receiptToken(String deviceSecret) => sha256.convert(utf8.encode(deviceSecret)).toString();
 
 /// The SDK's logic: it keeps the state the app wants (token, user, tags,
 /// permission) and the state the server last accepted, and sends the
 /// difference whenever they differ. Everything is saved, so changes made
 /// offline are sent on a later start.
+@internal
 class DakClient {
   DakClient({
     required this.api,

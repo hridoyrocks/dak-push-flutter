@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dak_push/dak_push.dart';
 import 'package:dak_push/src/api.dart';
+import 'package:dak_push/src/client.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';

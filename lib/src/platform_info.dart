@@ -2,11 +2,13 @@ import 'dart:io' show Platform;
 import 'dart:ui' show PlatformDispatcher;
 
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:meta/meta.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 /// Facts about the install the server uses for targeting. Nothing that
 /// identifies the person or the phone: no model, no IP, no location (the UTC
 /// offset only if the app opts in).
+@internal
 abstract class DakPlatformInfo {
   /// "android" or "ios".
   String get platform;

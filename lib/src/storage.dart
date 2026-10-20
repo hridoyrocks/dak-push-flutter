@@ -2,8 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:meta/meta.dart';
 
 /// One string kept between app starts.
 abstract class DakStateStore {
@@ -15,6 +16,7 @@ abstract class DakStateStore {
 /// between app starts: one small JSON string. Receipts from Firebase's
 /// background isolate are kept apart, one entry each, so the two isolates
 /// never overwrite each other's writes.
+@internal
 abstract class DakStorage implements DakStateStore {
   @override
   Future<String?> read();
@@ -240,6 +242,7 @@ Future<void> moveLegacyState({
 }
 
 /// Keeps state in memory only (tests).
+@internal
 class MemoryDakStorage implements DakStorage {
   String? value;
   final receipts = <String>[];

@@ -5,7 +5,7 @@ import 'dart:math' as math;
 
 import 'package:dak_push/dak_push.dart';
 import 'package:dak_push/src/api.dart';
-import 'package:dak_push/src/client.dart' show clampUtf8;
+import 'package:dak_push/src/client.dart' show DakClient, clampUtf8;
 import 'package:dak_push/src/dak.dart' show DakOnce;
 import 'package:dak_push/src/storage.dart';
 import 'package:flutter/services.dart';

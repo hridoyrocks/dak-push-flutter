@@ -3,6 +3,10 @@ import 'dart:convert';
 
 import 'package:dak_push/dak_push.dart';
 import 'package:dak_push/src/api.dart';
+import 'package:dak_push/src/client.dart';
+import 'package:dak_push/src/messaging.dart';
+import 'package:dak_push/src/native.dart';
+import 'package:dak_push/src/platform_info.dart';
 import 'package:dak_push/src/storage.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart' show AppLifecycleState;
