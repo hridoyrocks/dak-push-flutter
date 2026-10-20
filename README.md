@@ -2,7 +2,8 @@
 
 Flutter SDK for [Dak](https://github.com/hridoyrocks/dak-push), a self-hosted
 push notification server. It registers the device with your Dak server, links
-it to your user, keeps tags, and reports deliveries, opens and button taps.
+it to your user, keeps tags, reports deliveries, opens and button taps, and
+shows in-app messages.
 
 Android and iOS. Delivery goes through your own Firebase project (FCM, and
 APNs via the key in Firebase), so pushes cost nothing. Works with
@@ -12,7 +13,7 @@ firebase_messaging 15, 16 and 17.
 
 ```yaml
 dependencies:
-  dak_push: ^0.2.0
+  dak_push: ^0.3.0
 ```
 
 The app needs Firebase set up as usual (`google-services.json`,
@@ -96,7 +97,8 @@ app; `n.actionId` is the button's id and the server counts taps per button.
 
 - **Android:** FCM's own notifications cannot have buttons, so Dak sends such
   messages as data and this SDK shows them (title, body, image, buttons,
-  channel). Devices with SDK 0.1 get the same notification without buttons.
+  channel). Devices with an older SDK (0.1, or 0.2 with in-app messages only) get
+  the same notification without buttons.
 - **iOS:** the [notification service extension](doc/ios-notification-service-extension.md)
   adds the buttons. With firebase_messaging 17 the tapped button comes from
   Firebase. With 15 or 16 the SDK reads it from the notification response,
@@ -121,6 +123,65 @@ offset in minutes (+360 in Bangladesh), and again when it changes. Only the
 offset: no timezone name, city or location. The server uses it for messages
 with `local_time` ("send at 09:00 for each user") and for quiet hours. Without
 it the app's timezone (set on the server) is used.
+
+## In-app messages
+
+Messages shown inside the app while it is open: a centred modal, a top or
+bottom banner, a full-screen page or a card that slides up. They are drawn with
+plain Flutter widgets (no WebView) and take your theme's colours unless the
+message sets its own. Create them with the REST API (`POST /v1/in-app`, see
+[`docs/openapi.yaml`](../../../docs/openapi.yaml)); push permission is not
+needed to see them.
+
+Give them a place above all your pages, in `MaterialApp`'s builder:
+
+```dart
+MaterialApp(builder: Dak.inAppBuilder, ...);
+
+// With a builder of your own:
+MaterialApp(builder: (context, child) => DakInAppHost(child: myBuilder(context, child)));
+```
+
+Call `Dak.init` before `runApp`, so the Android back button closes a message
+instead of the page under it.
+
+```dart
+// Triggers: conditions a message can wait for. Kept in memory only, never sent.
+Dak.addTrigger('screen', 'home');
+Dak.addTriggers({'lessons_done': 3, 'premium': true});
+Dak.removeTrigger('screen');
+
+// Clicks on a message or its buttons. Deep links are yours to route; `url`
+// actions open the browser and `tags` actions set tags by themselves.
+Dak.onInAppClick.listen((click) {
+  if (click.actionType == 'deep_link') router.go(click.url!);
+  analytics.log('in_app_click', {'message': click.messageId, 'button': click.buttonId});
+});
+
+// Keep messages away from screens that must not be covered:
+Dak.pauseInApp(true);   // ... and false when done
+// or, for one screen, while it is in the widget tree:
+DakInAppBlock(child: CallScreen());
+```
+
+How it works:
+
+- At each session start the SDK fetches the messages this device may see (the
+  server checks the audience, schedule and status) and keeps them, so they also
+  show offline. A new session starts on a cold start or after 5 minutes in the
+  background (`DakOptions(sessionTimeout: …)`).
+- The SDK checks each message's triggers on the phone: session count, time in
+  the session, time since install, and your custom triggers. No triggers means
+  "when the app opens".
+- One message at a time, highest priority first. Frequency (`once`,
+  `every_session`, every N seconds, at most N times) is kept on the phone and
+  on the server.
+- Impressions, clicks (with the button id) and dismissals are sent in batches;
+  the server counts each event once and shows the stats per message.
+- An image is loaded before the message shows. If it fails, a message with text
+  shows without it; an image-only message waits for the next session.
+- Messages this SDK version cannot show (a newer layout, action or trigger) are
+  skipped.
 
 ## Identity verification
 
@@ -161,6 +222,8 @@ tokens on 17 too.
 ## What is stored
 
 The SDK sends: the push token or FID, platform, app/OS/SDK version, language,
-whether notifications are allowed, the user id and tags you set, and the UTC
-offset only if you turn it on. Nothing else: no IP, location, phone number,
-email or device model.
+whether notifications are allowed, the user id and tags you set, which pushes
+arrived and were opened (with the button), which in-app messages were shown,
+clicked or dismissed, and the UTC offset only if you turn it on. Nothing else:
+no IP, location, phone number, email or device model. In-app triggers stay on
+the phone.

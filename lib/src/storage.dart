@@ -14,11 +14,11 @@ abstract class DakStorage {
 
 /// Keychain on iOS, encrypted storage on Android.
 class SecureDakStorage implements DakStorage {
-  SecureDakStorage([this._storage = const FlutterSecureStorage()]);
+  SecureDakStorage([this._storage = const FlutterSecureStorage(), this._key = 'dak_push_state']);
 
-  static const _key = 'dak_push_state';
   static const _receiptsKey = 'dak_push_receipts';
   final FlutterSecureStorage _storage;
+  final String _key;
 
   @override
   Future<String?> read() => _storage.read(key: _key);

@@ -16,7 +16,7 @@ void main() {
       'platform': 'android',
       'app_version': '8.0.2+533',
       'os_version': '14',
-      'sdk_version': '0.2.0',
+      'sdk_version': '0.3.0',
       'language': 'bn',
       'push_permission': false,
       'subscribed': true,

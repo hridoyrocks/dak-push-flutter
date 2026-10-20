@@ -15,6 +15,14 @@ class FakeServer {
   final openedActions = <String?>[];
   final delivered = <String>[];
   bool offline = false;
+
+  /// In-app messages the server hands out, with their ETag.
+  List<Map<String, dynamic>> inApp = [];
+  String inAppEtag = '"v1"';
+  final inAppEvents = <Map<String, dynamic>>[];
+
+  /// Headers of every request, in order.
+  final headers = <Map<String, String>>[];
   int _n = 0;
 
   /// Return a response to override the next matching request.
@@ -25,6 +33,7 @@ class FakeServer {
     final body = req.body.isEmpty ? <String, dynamic>{} : jsonDecode(req.body) as Map<String, dynamic>;
     final path = req.url.path;
     requests.add((method: req.method, path: path, body: body));
+    headers.add(req.headers);
     final forced = intercept?.call(req.method, path, body);
     if (forced != null) return forced;
 
@@ -43,6 +52,15 @@ class FakeServer {
     final d = devices[id];
     if (d == null || req.headers['Authorization'] != 'Device ${d['secret']}') {
       return _json(401, {'error': {'code': 'unauthorized', 'message': 'register again'}});
+    }
+    if (req.method == 'GET' && parts.length == 7 && parts[6] == 'in-app') {
+      if (req.headers['If-None-Match'] == inAppEtag) return http.Response('', 304, headers: {'etag': inAppEtag});
+      return _json(200, {'messages': inApp}, {'etag': inAppEtag});
+    }
+    if (req.method == 'POST' && parts.length == 8 && parts[7] == 'events') {
+      final events = (body['events'] as List).cast<Map<String, dynamic>>();
+      inAppEvents.addAll(events);
+      return _json(200, {'accepted': events.length});
     }
     if (req.method == 'PATCH') {
       _apply(d, body);
@@ -71,8 +89,8 @@ class FakeServer {
     });
   }
 
-  static http.Response _json(int status, Object body) =>
-      http.Response(jsonEncode(body), status, headers: {'content-type': 'application/json'});
+  static http.Response _json(int status, Object body, [Map<String, String> extra = const {}]) =>
+      http.Response(jsonEncode(body), status, headers: {'content-type': 'application/json', ...extra});
 
   static http.Response error(int status, String code) => _json(status, {'error': {'code': code, 'message': code}});
 
@@ -199,4 +217,80 @@ Future<void> settle() async {
   for (var i = 0; i < 10; i++) {
     await Future<void>.delayed(Duration.zero);
   }
+}
+
+/// A Dak in-app message as the server sends it.
+Map<String, dynamic> inAppMessage(
+  String id, {
+  String layout = 'modal',
+  Map<String, dynamic>? content,
+  List<Object?> triggers = const [],
+  Map<String, dynamic> frequency = const {'type': 'once'},
+  int priority = 0,
+  String? startAt,
+  String? endAt,
+  int shown = 0,
+  String? lastShownAt,
+}) =>
+    {
+      'id': id,
+      'layout': layout,
+      'content': content ?? {'title': 'Title $id', 'body': 'Body $id'},
+      'triggers': triggers,
+      'frequency': frequency,
+      'priority': priority,
+      if (startAt != null) 'start_at': startAt,
+      if (endAt != null) 'end_at': endAt,
+      'updated_at': '2026-10-20T00:00:00Z',
+      'shown': shown,
+      if (lastShownAt != null) 'last_shown_at': lastShownAt,
+    };
+
+/// A DakInAppController against [FakeServer], with a device already
+/// registered and a clock the test moves.
+class InAppHarness {
+  InAppHarness({MemoryDakStorage? storage, this.registered = true}) : storage = storage ?? MemoryDakStorage() {
+    server.devices['dev-1'] = {'secret': 's1', 'tags': <String, String>{}};
+  }
+
+  final server = FakeServer();
+  final MemoryDakStorage storage;
+  bool registered;
+  DateTime now = DateTime(2026, 10, 20, 12);
+  final tagsSet = <Map<String, Object?>>[];
+  final opened = <Uri>[];
+  final clicks = <DakInAppClick>[];
+
+  late final controller = DakInAppController(
+    api: DakApi(baseUrl: 'https://push.test', appId: 'app-1', client: server.client),
+    storage: storage,
+    credentials: () => registered ? (deviceId: 'dev-1', secret: 's1') : null,
+    setTags: (t) async => tagsSet.add(t),
+    openUrl: (u) async {
+      opened.add(u);
+      return true;
+    },
+    eventDelay: null,
+    clock: () => now,
+  )..onClick.listen(clicks.add);
+
+  /// Starts and attaches, like an app with the host in place.
+  Future<DakInAppController> start({bool attach = true}) async {
+    await controller.start();
+    if (attach) controller.attach();
+    return controller;
+  }
+
+  String? get showing => controller.current.value?.id;
+
+  /// Shows what is current on screen (the host's part).
+  String? display() {
+    final m = controller.current.value;
+    if (m != null) controller.didDisplay(m);
+    return m?.id;
+  }
+
+  List<String> get eventTypes => [
+        for (final e in server.inAppEvents) '${e['type']} ${e['message_id']}${e['button_id'] == null ? '' : ' ${e['button_id']}'}'
+      ];
 }

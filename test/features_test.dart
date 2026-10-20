@@ -287,7 +287,7 @@ void main() {
     expect(h.server.opened, ['old-open']);
     final patch = h.server.requests.first.body;
     expect(patch.containsKey('token'), isFalse, reason: 'an unchanged token keeps its (default) type');
-    expect(patch['sdk_version'], '0.2.0');
+    expect(patch['sdk_version'], '0.3.0');
     final saved = jsonDecode(storage.value!) as Map<String, dynamic>;
     expect(saved['v'], 2);
     expect(saved['base_url'], 'https://push.test');
