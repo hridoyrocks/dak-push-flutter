@@ -294,6 +294,11 @@ in `ios/`.
 **Android build: "minSdkVersion 21 cannot be smaller than version 23 declared in
 library".** Set `minSdk = 23` or higher in `android/app/build.gradle.kts`.
 
+**Swift Package Manager: "the package at '…/FlutterFramework' cannot be
+accessed".** firebase_core 5 and firebase_messaging 17 need a Flutter that
+generates the FlutterFramework package (3.35 does not; 3.47 does). Update
+Flutter, or build with CocoaPods (`flutter config --no-enable-swift-package-manager`).
+
 **The device never shows up on the server.**
 - Check `appId` and `baseUrl` (the server's public URL, without `/v1`). Use
   `https`: plain `http` needs cleartext traffic allowed on Android and an App

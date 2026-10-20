@@ -149,12 +149,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        deps: [CocoaPods, Swift Package Manager]
+        include:
+          - deps: CocoaPods
+          # firebase_core 5 and firebase_messaging 17 import the FlutterFramework
+          # Swift package, which Flutter 3.35 does not generate.
+          - deps: Swift Package Manager
+            flutter: '3.47.7'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
+          flutter-version: ${{ matrix.flutter || env.FLUTTER_VERSION }}
           cache: true
       - name: Use Swift Package Manager
         if: matrix.deps == 'Swift Package Manager'
