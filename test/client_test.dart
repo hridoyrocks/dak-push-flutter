@@ -20,6 +20,10 @@ void main() {
       'language': 'bn',
       'push_permission': false,
       'subscribed': true,
+      // The whole state, so a row taken over for this token keeps nothing of
+      // an earlier install.
+      'external_id': null,
+      'utc_offset_minutes': null,
       'tags': <String, dynamic>{},
     });
     expect(h.client.deviceId, 'dev-1');

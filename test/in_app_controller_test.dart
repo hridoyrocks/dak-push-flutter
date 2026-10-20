@@ -286,9 +286,13 @@ void main() {
     expect(h.showing, isNull);
     c.unblock();
     expect(c.isPaused, isFalse);
-    expect(h.showing, 'b', reason: '"a" was seen (once), so the next one');
+    expect(h.showing, 'a', reason: 'the user did not close "a": it comes back after the block');
+    h.display();
+    c.dismiss(c.current.value!);
+    c.check();
+    expect(h.showing, 'b', reason: '"a" was seen (once) now');
     await c.flushEvents();
-    expect(h.eventTypes, ['impression a']);
+    expect(h.eventTypes, ['impression a', 'dismiss a'], reason: 'one impression for the interrupted display');
     c.unblock(); // more unblocks than blocks are harmless
     expect(c.isPaused, isFalse);
   });
@@ -458,6 +462,96 @@ void main() {
     broken.display();
     await c.flushEvents();
     expect(broken.eventTypes, ['impression a']);
+  });
+
+  group('robustness', () {
+    test('I9: a cache not refreshed for a week is not shown', () async {
+      h.server.inApp = [inAppMessage('a', frequency: {'type': 'every_session'})];
+      await h.start();
+      h.display();
+
+      final later = InAppHarness(storage: h.storage)..now = h.now.add(const Duration(days: 8));
+      addTearDown(later.controller.dispose);
+      later.server.offline = true;
+      final c = await later.start();
+      expect(later.showing, isNull, reason: 'the server may have stopped it since');
+
+      later.server.offline = false;
+      later.server.inApp = [inAppMessage('a', frequency: {'type': 'every_session'})];
+      await c.refresh(force: true);
+      c.check();
+      expect(later.showing, 'a');
+    });
+
+    test('I11: hosts are counted; the first one draws, and the message moves on without a new impression',
+        () async {
+      h.server.inApp = [inAppMessage('a')];
+      final c = await h.start(attach: false);
+      final outer = Object();
+      final inner = Object();
+      c.attach(outer);
+      c.attach(inner);
+      expect(c.activeHost.value, same(outer));
+      h.display();
+      c.detach(inner);
+      expect(h.showing, 'a', reason: 'the other host is still there');
+      c.detach(outer);
+      expect(h.showing, isNull);
+      expect(c.activeHost.value, isNull);
+
+      c.attach(inner);
+      expect(h.showing, 'a', reason: 'it was taken off screen, not closed');
+      h.display();
+      await c.flushEvents();
+      expect(h.eventTypes, ['impression a']);
+    });
+
+    test('I13: only allowed URL schemes are opened', () async {
+      final strict = InAppHarness(urlSchemes: const {'https'});
+      addTearDown(strict.controller.dispose);
+      strict.server.inApp = [
+        for (final (id, url) in [
+          ('web', 'https://example.com/a'),
+          ('plain', 'http://example.com/b'),
+          ('intent', 'intent://scan/#Intent;scheme=zxing;end'),
+          ('file', 'file:///etc/passwd'),
+          ('js', 'javascript:alert(1)'),
+        ])
+          inAppMessage(id, content: {
+            'title': id,
+            'click_action': {'type': 'url', 'url': url},
+          }, frequency: const {'type': 'every_session'}),
+      ];
+      final c = await strict.start();
+      for (var i = 0; i < 5; i++) {
+        final m = c.current.value!;
+        strict.display();
+        await c.click(m);
+        c.check();
+      }
+      expect(strict.opened.map((u) => u.toString()), ['https://example.com/a']);
+      expect(strict.clicks, hasLength(5), reason: 'the app still hears about every click');
+    });
+
+    test('I14: a once message hidden by a block comes back after a restart too', () async {
+      h.server.inApp = [inAppMessage('a')];
+      final c = await h.start();
+      h.display();
+      c.block();
+      await c.flushEvents();
+
+      final next = InAppHarness(storage: h.storage)..now = h.now.add(const Duration(hours: 1));
+      addTearDown(next.controller.dispose);
+      next.server.inApp = [inAppMessage('a', shown: 1)];
+      await next.start();
+      expect(next.showing, 'a');
+      next.display();
+      await next.controller.flushEvents();
+      expect(next.eventTypes, isEmpty, reason: 'its impression was counted the first time');
+      next.controller.dismiss(next.controller.current.value!);
+      next.controller.check();
+      expect(next.showing, isNull);
+    });
   });
 }
 

@@ -1,8 +1,26 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'model.dart';
+
+/// The image of [m], decoded at about the size it is drawn rather than the
+/// file's full size. The host precaches the same provider.
+ImageProvider dakInAppImage(BuildContext context, DakInAppMessage m) {
+  final screen = MediaQuery.sizeOf(context);
+  final logical = switch (m.layout) {
+    DakInAppLayout.modal => math.min(screen.width - 48, 400.0),
+    // Wide images fill the card's 200-high box by its height.
+    DakInAppLayout.card => math.min(screen.width, 600.0) * 1.5,
+    // BoxFit.cover in a tall box: the longer side of the screen.
+    DakInAppLayout.fullscreen => math.max(screen.width, screen.height),
+    DakInAppLayout.bannerTop || DakInAppLayout.bannerBottom => 96.0,
+  };
+  final width = (math.max(logical, 48.0) * MediaQuery.devicePixelRatioOf(context)).round();
+  return ResizeImage(NetworkImage(m.content.imageUrl!), width: width, allowUpscaling: false);
+}
 
 /// Draws one in-app message in its layout with plain Flutter widgets.
 /// Colours the message leaves out come from the app's theme.
@@ -20,21 +38,46 @@ class DakInAppView extends StatefulWidget {
 }
 
 class _DakInAppViewState extends State<DakInAppView> with SingleTickerProviderStateMixin {
-  late final _anim = AnimationController(vsync: this, duration: const Duration(milliseconds: 220))..forward();
+  late final _anim = AnimationController(vsync: this, duration: const Duration(milliseconds: 220));
+  // Made once: a CurvedAnimation listens to its parent until disposed.
+  late final _curve = CurvedAnimation(parent: _anim, curve: Curves.easeOutCubic);
+  late final _scale = Tween(begin: 0.92, end: 1.0).animate(_curve);
+  late final _fromTop = Tween(begin: const Offset(0, -1), end: Offset.zero).animate(_curve);
+  late final _fromBottom = Tween(begin: const Offset(0, 1), end: Offset.zero).animate(_curve);
   Timer? _auto;
+  bool _started = false;
 
   DakInAppMessage get m => widget.message;
 
   @override
-  void initState() {
-    super.initState();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final media = MediaQuery.maybeOf(context);
+    if (!_started) {
+      _started = true;
+      // Reduced motion: no slide or fade.
+      if (media?.disableAnimations ?? false) {
+        _anim.value = 1;
+      } else {
+        _anim.forward();
+      }
+    }
+    // Screen reader users need the time it takes to find the banner: no
+    // auto-dismiss for them.
     final after = m.content.autoDismiss;
-    if (m.layout.isBanner && after != null) _auto = Timer(after, widget.onDismiss);
+    final reading = media?.accessibleNavigation ?? false;
+    if (!m.layout.isBanner || after == null || reading) {
+      _auto?.cancel();
+      _auto = null;
+    } else {
+      _auto ??= Timer(after, widget.onDismiss);
+    }
   }
 
   @override
   void dispose() {
     _auto?.cancel();
+    _curve.dispose();
     _anim.dispose();
     super.dispose();
   }
@@ -42,26 +85,51 @@ class _DakInAppViewState extends State<DakInAppView> with SingleTickerProviderSt
   @override
   Widget build(BuildContext context) {
     final p = _Parts(context, m, widget.onClick, widget.onDismiss);
-    final curve = CurvedAnimation(parent: _anim, curve: Curves.easeOutCubic);
-    Widget slide(Offset from, Widget child) =>
-        SlideTransition(position: Tween(begin: from, end: Offset.zero).animate(curve), child: child);
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom;
 
     final Widget view = switch (m.layout) {
       DakInAppLayout.modal => _Backdrop(
           onTap: widget.onDismiss,
-          child: Center(child: ScaleTransition(scale: Tween(begin: 0.92, end: 1.0).animate(curve), child: p.modal())),
+          child: p.dialog(
+            Padding(
+              padding: EdgeInsets.only(bottom: keyboard),
+              child: Center(child: ScaleTransition(scale: _scale, child: p.modal())),
+            ),
+          ),
         ),
       DakInAppLayout.card => _Backdrop(
           onTap: widget.onDismiss,
-          child: Align(alignment: Alignment.bottomCenter, child: slide(const Offset(0, 1), p.card())),
+          child: p.dialog(
+            Padding(
+              padding: EdgeInsets.only(bottom: keyboard),
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                child: SlideTransition(position: _fromBottom, child: p.card()),
+              ),
+            ),
+          ),
         ),
-      DakInAppLayout.fullscreen => BlockSemantics(child: p.fullscreen()),
-      DakInAppLayout.bannerTop => slide(const Offset(0, -1), p.banner(top: true)),
-      DakInAppLayout.bannerBottom => slide(const Offset(0, 1), p.banner(top: false)),
+      DakInAppLayout.fullscreen => BlockSemantics(child: p.dialog(p.fullscreen())),
+      DakInAppLayout.bannerTop => SlideTransition(position: _fromTop, child: p.announced(p.banner(top: true))),
+      DakInAppLayout.bannerBottom => Padding(
+          padding: EdgeInsets.only(bottom: keyboard),
+          child: SlideTransition(position: _fromBottom, child: p.announced(p.banner(top: false))),
+        ),
     };
-    return KeyedSubtree(
-      key: Key('dak-in-app-${m.layout.wire}'),
-      child: FadeTransition(opacity: curve, child: view),
+    // Escape (and the platform's other dismiss keys) closes the message;
+    // modal layouts take the focus like a dialog.
+    return Shortcuts(
+      shortcuts: const {SingleActivator(LogicalKeyboardKey.escape): DismissIntent()},
+      child: Actions(
+        actions: {DismissIntent: CallbackAction<DismissIntent>(onInvoke: (_) => widget.onDismiss())},
+        child: FocusScope(
+          autofocus: !m.layout.isBanner,
+          child: KeyedSubtree(
+            key: Key('dak-in-app-${m.layout.wire}'),
+            child: FadeTransition(opacity: _curve, child: view),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -78,16 +146,26 @@ class _Backdrop extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            GestureDetector(
-              key: const Key('dak-in-app-backdrop'),
+            Semantics(
+              label: _localizations(context)?.modalBarrierDismissLabel ?? 'Dismiss',
               onTap: onTap,
-              child: const ColoredBox(color: Color(0x8A000000)),
+              child: GestureDetector(
+                key: const Key('dak-in-app-backdrop'),
+                excludeFromSemantics: true,
+                onTap: onTap,
+                child: const ColoredBox(color: Color(0x8A000000)),
+              ),
             ),
             child,
           ],
         ),
       );
 }
+
+/// Material's strings when the app has them (a host outside MaterialApp may
+/// not).
+MaterialLocalizations? _localizations(BuildContext context) =>
+    Localizations.of<MaterialLocalizations>(context, MaterialLocalizations);
 
 class _Parts {
   _Parts(this.context, this.m, this.onClick, this.onDismiss)
@@ -105,6 +183,37 @@ class _Parts {
 
   DakInAppContent get c => m.content;
   Color get background => c.backgroundColor ?? scheme.surface;
+
+  /// Text on the message's background: the theme's colour on the theme's
+  /// surface; black or white, whichever reads, on a background the message
+  /// sets.
+  Color get onBackground => c.backgroundColor == null ? scheme.onSurface : _readableOn(c.backgroundColor!);
+  Color get onBackgroundVariant =>
+      c.backgroundColor == null ? scheme.onSurfaceVariant : onBackground.withAlpha(0xC0);
+
+  static Color _readableOn(Color bg) =>
+      ThemeData.estimateBrightnessForColor(bg) == Brightness.dark ? Colors.white : const Color(0xDE000000);
+
+  String get closeLabel => _localizations(context)?.closeButtonTooltip ?? 'Close';
+
+  /// A modal layout as screen readers know dialogs: its own route, named by
+  /// its title, closed by their dismiss gesture.
+  Widget dialog(Widget child) => Semantics(
+        scopesRoute: true,
+        namesRoute: true,
+        explicitChildNodes: true,
+        label: hasTitle ? c.title : (hasBody ? c.body : null),
+        onDismiss: onDismiss,
+        child: child,
+      );
+
+  /// A banner is read out when it appears (Android's live region).
+  Widget announced(Widget child) => Semantics(
+        container: true,
+        liveRegion: true,
+        onDismiss: onDismiss,
+        child: child,
+      );
   bool get hasImage => c.imageUrl?.isNotEmpty ?? false;
   bool get hasTitle => c.title?.trim().isNotEmpty ?? false;
   bool get hasBody => c.body?.trim().isNotEmpty ?? false;
@@ -114,7 +223,7 @@ class _Parts {
         textAlign: align,
         maxLines: maxLines,
         overflow: maxLines == null ? null : TextOverflow.ellipsis,
-        style: (style ?? text.titleLarge)?.copyWith(color: c.titleColor ?? scheme.onSurface, fontWeight: FontWeight.w600),
+        style: (style ?? text.titleLarge)?.copyWith(color: c.titleColor ?? onBackground, fontWeight: FontWeight.w600),
       );
 
   Widget body({TextAlign align = TextAlign.center, int? maxLines}) => Text(
@@ -122,12 +231,12 @@ class _Parts {
         textAlign: align,
         maxLines: maxLines,
         overflow: maxLines == null ? null : TextOverflow.ellipsis,
-        style: text.bodyMedium?.copyWith(color: c.bodyColor ?? scheme.onSurfaceVariant),
+        style: text.bodyMedium?.copyWith(color: c.bodyColor ?? onBackgroundVariant),
       );
 
   Widget image({double? height, double? width}) {
-    final img = Image.network(
-      c.imageUrl!,
+    final img = Image(
+      image: dakInAppImage(context, m),
       key: const Key('dak-in-app-image'),
       height: height,
       width: width,
@@ -143,8 +252,9 @@ class _Parts {
         type: MaterialType.circle,
         color: hasImage ? const Color(0x42000000) : Colors.transparent,
         child: IconButton(
-          icon: const Icon(Icons.close, size: 20),
-          color: hasImage ? Colors.white : (color ?? c.titleColor ?? scheme.onSurface),
+          // No tooltip: the host sits above the Navigator, without an Overlay.
+          icon: Icon(Icons.close, size: 20, semanticLabel: closeLabel),
+          color: hasImage ? Colors.white : (color ?? c.titleColor ?? onBackground),
           visualDensity: VisualDensity.compact,
           onPressed: onDismiss,
         ),
@@ -152,7 +262,13 @@ class _Parts {
 
   Widget button(DakInAppButton b, {required bool primary}) {
     final bg = b.backgroundColor ?? (primary ? scheme.primary : null);
-    final fg = b.textColor ?? (primary ? scheme.onPrimary : scheme.primary);
+    final fg = b.textColor ??
+        (b.backgroundColor != null
+            ? _readableOn(b.backgroundColor!)
+            : primary
+                ? scheme.onPrimary
+                // A text button on the message's own background.
+                : (c.backgroundColor == null ? scheme.primary : onBackground));
     final label = Text(b.text, maxLines: 1, overflow: TextOverflow.ellipsis);
     final key = Key('dak-in-app-button-${b.id}');
     if (bg != null) {
@@ -202,7 +318,7 @@ class _Parts {
 
   Widget _withClose(Widget child, {double top = 4}) => Stack(children: [
         child,
-        if (c.closeButton) Positioned(top: top, right: 4, child: close()),
+        if (c.closeButton) PositionedDirectional(top: top, end: 4, child: close()),
       ]);
 
   Widget _tappable(Widget child) => c.clickAction == null ? child : InkWell(onTap: () => onClick(null), child: child);
@@ -299,7 +415,7 @@ class _Parts {
                   borderRadius: BorderRadius.circular(16),
                   clipBehavior: Clip.antiAlias,
                   child: _tappable(Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
+                    padding: const EdgeInsetsDirectional.fromSTEB(12, 10, 4, 10),
                     child: Row(children: [
                       if (hasImage) ...[
                         ClipRRect(borderRadius: BorderRadius.circular(10), child: image(height: 48, width: 48)),
@@ -328,8 +444,8 @@ class _Parts {
 
   Widget _bannerClose() => IconButton(
         key: const Key('dak-in-app-close'),
-        icon: const Icon(Icons.close, size: 18),
-        color: c.titleColor ?? scheme.onSurfaceVariant,
+        icon: Icon(Icons.close, size: 18, semanticLabel: closeLabel),
+        color: c.titleColor ?? onBackgroundVariant,
         visualDensity: VisualDensity.compact,
         onPressed: onDismiss,
       );
