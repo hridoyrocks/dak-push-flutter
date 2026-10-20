@@ -21,6 +21,13 @@ class DakApiException implements Exception {
   String toString() => 'DakApiException($status $code: $message)';
 }
 
+/// The in-app messages for a device, with the ETag to send next time.
+class InAppList {
+  InAppList(this.messages, this.etag);
+  final List<Object?> messages;
+  final String? etag;
+}
+
 class Registration {
   Registration(this.deviceId, this.deviceSecret);
   final String deviceId;
@@ -58,13 +65,30 @@ class DakApi {
     await _send('POST', _uri('/devices/$deviceId/opened'), {'message_id': messageId}, secret);
   }
 
-  Future<http.Response> _send(String method, Uri uri, Map<String, Object?> body, String? secret) async {
-    final req = http.Request(method, uri)
-      ..headers['Content-Type'] = 'application/json'
-      ..body = jsonEncode(body);
+  /// The in-app messages this device may show; null when unchanged since
+  /// [etag].
+  Future<InAppList?> fetchInApp(String deviceId, String secret, {String? etag}) async {
+    final res = await _send('GET', _uri('/devices/$deviceId/in-app'), null, secret,
+        headers: {if (etag != null) 'If-None-Match': etag});
+    if (res.statusCode == 304) return null;
+    final js = jsonDecode(res.body) as Map<String, dynamic>;
+    return InAppList((js['messages'] as List?) ?? const [], res.headers['etag']);
+  }
+
+  Future<void> sendInAppEvents(String deviceId, String secret, List<Map<String, Object?>> events) async {
+    await _send('POST', _uri('/devices/$deviceId/in-app/events'), {'events': events}, secret);
+  }
+
+  Future<http.Response> _send(String method, Uri uri, Map<String, Object?>? body, String? secret,
+      {Map<String, String> headers = const {}}) async {
+    final req = http.Request(method, uri)..headers.addAll(headers);
+    if (body != null) {
+      req.headers['Content-Type'] = 'application/json';
+      req.body = jsonEncode(body);
+    }
     if (secret != null) req.headers['Authorization'] = 'Device $secret';
     final res = await http.Response.fromStream(await _http.send(req).timeout(timeout));
-    if (res.statusCode >= 200 && res.statusCode < 300) return res;
+    if ((res.statusCode >= 200 && res.statusCode < 300) || res.statusCode == 304) return res;
     var code = 'http_${res.statusCode}';
     var message = res.reasonPhrase ?? '';
     try {

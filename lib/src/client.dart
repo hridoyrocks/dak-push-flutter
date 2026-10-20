@@ -7,7 +7,7 @@ import 'notification.dart';
 import 'platform_info.dart';
 import 'storage.dart';
 
-const kDakSdkVersion = '0.1.0';
+const kDakSdkVersion = '0.2.0';
 
 /// A problem the app has to fix, such as a wrong auth hash or a bad tag.
 /// Network trouble never throws: changes are kept and sent later.
@@ -75,6 +75,8 @@ class DakClient {
 
   final _openedCtl = StreamController<DakNotification>.broadcast();
   final _foregroundCtl = StreamController<DakNotification>.broadcast();
+  final _registeredCtl = StreamController<void>.broadcast();
+  final _loaded = Completer<void>();
   final _subs = <StreamSubscription<dynamic>>[];
   DakNotification? _initial;
   Future<void>? _running;
@@ -89,6 +91,16 @@ class DakClient {
   Stream<DakNotification> get onOpened => _openedCtl.stream;
   Stream<DakNotification> get onForeground => _foregroundCtl.stream;
 
+  /// Completes once saved state is loaded, before any network call.
+  Future<void> get loaded => _loaded.future;
+
+  /// The device's id and secret, for the SDK's other parts (in-app messages).
+  ({String deviceId, String secret})? get credentials =>
+      _deviceId == null || _secret == null ? null : (deviceId: _deviceId!, secret: _secret!);
+
+  /// Fires when the device is registered (again), so it now has credentials.
+  Stream<void> get onRegistered => _registeredCtl.stream;
+
   /// The notification the user tapped to open the app, if any.
   DakNotification? get initialNotification => _initial;
 
@@ -96,6 +108,7 @@ class DakClient {
     if (_started) return;
     _started = true;
     await _load();
+    _loaded.complete();
     _appVersion = await platform.appVersion();
     _osVersion = await platform.osVersion();
     _language = platform.language();
@@ -195,6 +208,7 @@ class DakClient {
     }
     await _openedCtl.close();
     await _foregroundCtl.close();
+    await _registeredCtl.close();
   }
 
   void _handleOpen(DakNotification n) {
@@ -304,6 +318,7 @@ class DakClient {
       _reported = desired;
       _lastSeenSent = _now();
       await _save();
+      _registeredCtl.add(null);
       return;
     }
 

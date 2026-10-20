@@ -21,7 +21,8 @@ class ExampleApp extends StatelessWidget {
   const ExampleApp({super.key});
 
   @override
-  Widget build(BuildContext context) => const MaterialApp(home: HomePage());
+  // Dak.inAppBuilder shows in-app messages above every page.
+  Widget build(BuildContext context) => const MaterialApp(builder: Dak.inAppBuilder, home: HomePage());
 }
 
 class HomePage extends StatefulWidget {
@@ -35,7 +36,7 @@ class _HomePageState extends State<HomePage> {
   final _events = <String>[];
   final _user = TextEditingController();
   final _hash = TextEditingController();
-  final _subs = <StreamSubscription<DakNotification>>[];
+  final _subs = <StreamSubscription<Object>>[];
   String _status = '';
 
   @override
@@ -45,6 +46,7 @@ class _HomePageState extends State<HomePage> {
     if (launch != null) _events.add('Launched from: ${launch.title} → ${launch.url}');
     _subs.add(Dak.onOpened.listen((n) => setState(() => _events.add('Opened: ${n.title} → ${n.url}'))));
     _subs.add(Dak.onForeground.listen((n) => setState(() => _events.add('While open: ${n.title}: ${n.body}'))));
+    _subs.add(Dak.onInAppClick.listen((c) => setState(() => _events.add('In-app click: $c'))));
   }
 
   @override
@@ -96,6 +98,13 @@ class _HomePageState extends State<HomePage> {
               onPressed: () => _run('Tag', () => Dak.setTags({'example': true})),
               child: const Text('Tag example=true'),
             ),
+          ]),
+          Row(children: [
+            TextButton(
+              onPressed: () => Dak.addTrigger('screen', 'example'),
+              child: const Text('Trigger screen=example'),
+            ),
+            TextButton(onPressed: Dak.clearTriggers, child: const Text('Clear triggers')),
           ]),
           Text(_status),
           const Divider(),
