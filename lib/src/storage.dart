@@ -1,16 +1,36 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-/// Where the SDK keeps its state (device id, device secret, pending changes)
-/// between app starts: one small JSON string. Receipts from Firebase's
-/// background isolate are kept apart, so the two never overwrite each other.
-abstract class DakStorage {
+/// One string kept between app starts.
+abstract class DakStateStore {
   Future<String?> read();
   Future<void> write(String value);
+}
 
-  /// Delivery receipts the background handler could not send (a JSON list).
-  Future<String?> readReceipts();
-  Future<void> writeReceipts(String value);
+/// Where the SDK keeps its state (device id, device secret, pending changes)
+/// between app starts: one small JSON string. Receipts from Firebase's
+/// background isolate are kept apart, one entry each, so the two isolates
+/// never overwrite each other's writes.
+abstract class DakStorage implements DakStateStore {
+  @override
+  Future<String?> read();
+  @override
+  Future<void> write(String value);
+
+  /// Keeps a delivery receipt the background handler could not send.
+  Future<void> addReceipt(String messageId);
+
+  /// The receipts the background handler kept. They stay until
+  /// [removeReceipts], so a crash in between loses none.
+  Future<List<String>> readReceipts();
+  Future<void> removeReceipts(Iterable<String> messageIds);
+
+  /// Forgets the state and the receipts (state left by an earlier install).
+  Future<void> clear();
 }
 
 /// The keychain calls [SecureDakStorage] makes: flutter_secure_storage in
@@ -25,6 +45,9 @@ abstract class DakKeychain {
 
   /// Removes the item whatever its accessibility.
   Future<void> delete(String key);
+
+  /// The keys of all items saved with the current accessibility.
+  Future<Iterable<String>> keys();
 }
 
 class FlutterDakKeychain implements DakKeychain {
@@ -53,6 +76,9 @@ class FlutterDakKeychain implements DakKeychain {
 
   @override
   Future<void> delete(String key) => _storage.delete(key: key, iOptions: iosOptions);
+
+  @override
+  Future<Iterable<String>> keys() async => (await _storage.readAll(iOptions: iosOptions)).keys;
 }
 
 /// Keychain on iOS, encrypted storage on Android.
@@ -61,10 +87,16 @@ class SecureDakStorage implements DakStorage {
       : _key = key,
         _keychain = keychain ?? FlutterDakKeychain();
 
-  static const _receiptsKey = 'dak_push_receipts';
+  /// How many receipts the background handler keeps at most.
+  static const maxReceipts = 200;
+
+  /// 0.3 kept the receipts as one JSON list under this key.
+  static const _legacyReceiptsKey = 'dak_push_receipts';
   final DakKeychain _keychain;
   final String _key;
   final _checked = <String>{};
+
+  String get _receiptPrefix => '$_key.receipt.';
 
   @override
   Future<String?> read() => _read(_key);
@@ -72,11 +104,49 @@ class SecureDakStorage implements DakStorage {
   @override
   Future<void> write(String value) => _write(_key, value);
 
+  /// A key of its own, which never existed under 0.3.0's accessibility.
   @override
-  Future<String?> readReceipts() => _read(_receiptsKey);
+  Future<void> addReceipt(String messageId) async {
+    final keys = await _keychain.keys();
+    final key = '$_receiptPrefix$messageId';
+    if (keys.contains(key) || keys.where((k) => k.startsWith(_receiptPrefix)).length >= maxReceipts) return;
+    await _keychain.write(key, '1');
+  }
 
   @override
-  Future<void> writeReceipts(String value) => _write(_receiptsKey, value);
+  Future<List<String>> readReceipts() async {
+    final ids = [
+      for (final k in await _keychain.keys())
+        if (k.startsWith(_receiptPrefix)) k.substring(_receiptPrefix.length),
+    ];
+    final legacy = await _read(_legacyReceiptsKey);
+    if (legacy != null && legacy.isNotEmpty) {
+      try {
+        ids.addAll((jsonDecode(legacy) as List).whereType<String>());
+      } catch (_) {}
+    }
+    return ids;
+  }
+
+  @override
+  Future<void> removeReceipts(Iterable<String> messageIds) async {
+    for (final id in messageIds) {
+      await _keychain.delete('$_receiptPrefix$id');
+    }
+    // Nothing writes the old list any more.
+    await _keychain.delete(_legacyReceiptsKey);
+  }
+
+  /// Deletes only Dak's own keys: the app may keep its own secrets in the same
+  /// storage.
+  @override
+  Future<void> clear() async {
+    await removeReceipts(await readReceipts());
+    await delete();
+  }
+
+  /// Deletes this storage's state key only (an old in-app cache).
+  Future<void> delete() => _keychain.delete(_key);
 
   /// Throws when the keychain cannot be read (a locked phone); the caller
   /// must then not write, or it would replace state it never saw.
@@ -107,10 +177,72 @@ class SecureDakStorage implements DakStorage {
   }
 }
 
+/// A plain file, written atomically (a temporary file, then a rename). For
+/// state that holds no secret and changes often, like the in-app cache.
+class FileDakStateStore implements DakStateStore {
+  FileDakStateStore(this.path);
+
+  final String path;
+  Future<void> _last = Future.value();
+
+  /// Null when the file does not exist; other errors are thrown.
+  @override
+  Future<String?> read() async {
+    await _last;
+    try {
+      return await File(path).readAsString();
+    } on PathNotFoundException {
+      return null;
+    }
+  }
+
+  /// Writes one at a time, in order.
+  @override
+  Future<void> write(String value) {
+    final next = _last.then((_) => _write(value));
+    _last = next.then((_) {}, onError: (Object _) {});
+    return next;
+  }
+
+  Future<void> _write(String value) async {
+    final tmp = File('$path.tmp');
+    await tmp.parent.create(recursive: true);
+    await tmp.writeAsString(value, flush: true);
+    await tmp.rename(path);
+  }
+
+  Future<void> delete() async {
+    await _last;
+    try {
+      await File(path).delete();
+    } on PathNotFoundException {
+      // Already gone.
+    }
+  }
+}
+
+/// Moves state 0.3 kept in secure storage ([readOld]) to [to] the first time,
+/// then deletes the old copy ([deleteOld]). With [keep] false (state from an
+/// earlier install) the old copy is only deleted.
+Future<void> moveLegacyState({
+  required Future<String?> Function() readOld,
+  required Future<void> Function() deleteOld,
+  required DakStateStore to,
+  required bool keep,
+}) async {
+  final old = await readOld();
+  if (old == null) return;
+  if (keep && old.isNotEmpty) {
+    final current = await to.read();
+    if (current == null || current.isEmpty) await to.write(old);
+  }
+  await deleteOld();
+}
+
 /// Keeps state in memory only (tests).
 class MemoryDakStorage implements DakStorage {
   String? value;
-  String? receipts;
+  final receipts = <String>[];
 
   @override
   Future<String?> read() async => value;
@@ -119,8 +251,19 @@ class MemoryDakStorage implements DakStorage {
   Future<void> write(String v) async => value = v;
 
   @override
-  Future<String?> readReceipts() async => receipts;
+  Future<void> addReceipt(String messageId) async {
+    if (!receipts.contains(messageId) && receipts.length < SecureDakStorage.maxReceipts) receipts.add(messageId);
+  }
 
   @override
-  Future<void> writeReceipts(String v) async => receipts = v;
+  Future<List<String>> readReceipts() async => List.of(receipts);
+
+  @override
+  Future<void> removeReceipts(Iterable<String> messageIds) async => receipts.removeWhere(messageIds.toSet().contains);
+
+  @override
+  Future<void> clear() async {
+    value = null;
+    receipts.clear();
+  }
 }

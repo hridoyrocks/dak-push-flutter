@@ -46,9 +46,6 @@ Future<void> reportDelivery(
     }
   }
   try {
-    final raw = await store.readReceipts();
-    final pending = raw == null || raw.isEmpty ? <String>[] : (jsonDecode(raw) as List).cast<String>();
-    if (!pending.contains(id)) pending.add(id);
-    await store.writeReceipts(jsonEncode(pending.length > 200 ? pending.sublist(pending.length - 200) : pending));
+    await store.addReceipt(id);
   } catch (_) {}
 }

@@ -3,6 +3,8 @@ package io.github.hridoyrocks.dak_push
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import androidx.core.app.NotificationManagerCompat
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -10,6 +12,7 @@ import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.PluginRegistry
+import java.io.File
 
 /** Hands taps on notifications the SDK showed (with the button id) to Dart. */
 class DakPushPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware, PluginRegistry.NewIntentListener {
@@ -18,6 +21,7 @@ class DakPushPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAw
     private var binding: ActivityPluginBinding? = null
     private var initial: Map<String, Any?>? = null
     private var initialRead = false
+    private val main = Handler(Looper.getMainLooper())
 
     override fun onAttachedToEngine(b: FlutterPlugin.FlutterPluginBinding) {
         context = b.applicationContext
@@ -32,7 +36,15 @@ class DakPushPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAw
     override fun onAttachedToActivity(b: ActivityPluginBinding) {
         binding = b
         b.addOnNewIntentListener(this)
-        if (!initialRead && initial == null) initial = take(b.activity, b.activity.intent)
+        // With a cached engine Dart may have asked for the launch tap before any activity existed, and an
+        // activity can come and go while the engine lives on: a tap that starts an activity after Dart read
+        // the initial one goes to Dart as a tap.
+        val tap = take(b.activity, b.activity.intent) ?: return
+        if (initialRead) {
+            channel?.invokeMethod("onAction", tap)
+        } else if (initial == null) {
+            initial = tap
+        }
     }
 
     override fun onDetachedFromActivityForConfigChanges() = onDetachedFromActivity()
@@ -83,18 +95,32 @@ class DakPushPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAw
             "initialAction" -> {
                 result.success(if (initialRead) null else initial)
                 initialRead = true
+                initial = null
             }
             "show" -> {
                 val ctx = context
                 val data = call.argument<Map<String, String>>("data")
-                if (ctx != null && data != null && data["_dak_show"] == "1") {
-                    // show() never throws.
-                    Thread { DakNotifier.show(ctx, data) }.start()
+                if (ctx == null || data == null) {
+                    result.success(false)
+                    return
                 }
-                result.success(null)
+                Thread {
+                    val shown = try {
+                        DakNotifier.show(ctx, data)
+                    } catch (e: Throwable) {
+                        false
+                    }
+                    main.post { result.success(shown) }
+                }.start()
             }
+            // Kept out of backups (a restored copy would belong to another install) and deleted with the app.
+            "storageDirectory" -> {
+                val dir = context?.let { File(it.noBackupFilesDir, "dak_push") }
+                result.success(if (dir != null && (dir.isDirectory || dir.mkdirs())) dir.absolutePath else null)
+            }
+            "extensionReceipts" -> result.success(emptyList<String>())
             // iOS only.
-            "takeAction", "shareWithExtension", "setBadge" -> result.success(null)
+            "takeAction", "shareWithExtension", "setBadge", "removeExtensionReceipts" -> result.success(null)
             else -> result.notImplemented()
         }
     }

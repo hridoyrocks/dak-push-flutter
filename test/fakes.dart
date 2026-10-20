@@ -10,7 +10,8 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 /// A small stand-in for the Dak server that follows its rules: register by
-/// token, update with the device secret, tags merge with null deleting.
+/// token (its tags replace the row's), update with the device secret (tags
+/// merge, null deleting).
 class FakeServer {
   final devices = <String, Map<String, dynamic>>{};
   final requests = <({String method, String path, Map<String, dynamic> body})>[];
@@ -50,6 +51,7 @@ class FakeServer {
       final id = existing?.key ?? 'dev-${++_n}';
       final secret = 'secret-${++_n}';
       final d = existing?.value ?? {'tags': <String, String>{}};
+      if (body.containsKey('tags')) d['tags'] = <String, String>{};
       _apply(d, body);
       d['secret'] = secret;
       devices[id] = d;
@@ -169,6 +171,11 @@ class FakePlatform implements DakPlatformInfo {
 
 class FakeNative implements DakNative {
   DakNotification? initial;
+  String? directory;
+  bool showWorks = true;
+
+  /// Receipts the iOS extension kept, by App Group.
+  final extensionKept = <String, List<String>>{};
   final actions = StreamController<DakNotification>.broadcast();
   final iosActions = <String, String>{};
   final shared = <({String group, Map<String, String> values})>[];
@@ -196,11 +203,24 @@ class FakeNative implements DakNative {
   }
 
   @override
-  Future<void> show(Map<String, String> data) async => shown.add(data);
+  Future<bool> show(Map<String, String> data) async {
+    shown.add(data);
+    return showWorks;
+  }
+
+  @override
+  Future<String?> storageDirectory() async => directory;
+
+  @override
+  Future<List<String>> extensionReceipts(String appGroup) async => List.of(extensionKept[appGroup] ?? const []);
+
+  @override
+  Future<void> removeExtensionReceipts(String appGroup, List<String> messageIds) async =>
+      extensionKept[appGroup]?.removeWhere(messageIds.contains);
 }
 
 class Harness {
-  Harness({MemoryDakStorage? storage, this.shareTimezoneOffset = false, this.iosAppGroup})
+  Harness({MemoryDakStorage? storage, this.shareTimezoneOffset = false, this.iosAppGroup, this.installMarker})
       : storage = storage ?? MemoryDakStorage();
 
   final server = FakeServer();
@@ -210,7 +230,10 @@ class Harness {
   final MemoryDakStorage storage;
   final bool shareTimezoneOffset;
   final String? iosAppGroup;
+  final DakStateStore? installMarker;
   DateTime now = DateTime(2026, 10, 20, 12);
+  final logs = <String>[];
+  final warnings = <String>[];
 
   late final client = build();
 
@@ -229,9 +252,23 @@ class Harness {
         native: native,
         shareTimezoneOffset: shareTimezoneOffset,
         iosAppGroup: iosAppGroup,
+        installMarker: installMarker,
         retryDelays: const [], // tests call flush() instead of waiting
         clock: () => now,
+        log: logs.add,
+        warn: warnings.add,
       );
+}
+
+/// A marker kept in memory, like the file deleted with the app.
+class MemoryStateStore implements DakStateStore {
+  String? value;
+
+  @override
+  Future<String?> read() async => value;
+
+  @override
+  Future<void> write(String v) async => value = v;
 }
 
 /// Lets queued microtasks and stream events run.
@@ -271,13 +308,14 @@ Map<String, dynamic> inAppMessage(
 /// A DakInAppController against [FakeServer], with a device already
 /// registered and a clock the test moves.
 class InAppHarness {
-  InAppHarness({MemoryDakStorage? storage, this.registered = true, this.appState})
+  InAppHarness({MemoryDakStorage? storage, this.registered = true, this.appState, this.urlSchemes = const {'https', 'http'}})
       : storage = storage ?? MemoryDakStorage() {
     server.devices['dev-1'] = {'secret': 's1', 'tags': <String, String>{}};
   }
 
   final server = FakeServer();
   final MemoryDakStorage storage;
+  final Set<String> urlSchemes;
   bool registered;
   final AppLifecycleState? Function()? appState;
   DateTime now = DateTime(2026, 10, 20, 12);
@@ -294,6 +332,7 @@ class InAppHarness {
       opened.add(u);
       return true;
     },
+    urlSchemes: urlSchemes,
     eventDelay: null,
     appState: appState,
     clock: () => now,
@@ -347,15 +386,27 @@ class LockableStorage extends MemoryDakStorage {
   }
 
   @override
-  Future<String?> readReceipts() async {
+  Future<void> addReceipt(String messageId) async {
     if (locked) throw lockedError();
-    return receipts;
+    return super.addReceipt(messageId);
   }
 
   @override
-  Future<void> writeReceipts(String v) async {
+  Future<List<String>> readReceipts() async {
     if (locked) throw lockedError();
-    receipts = v;
+    return super.readReceipts();
+  }
+
+  @override
+  Future<void> removeReceipts(Iterable<String> messageIds) async {
+    if (locked) throw lockedError();
+    return super.removeReceipts(messageIds);
+  }
+
+  @override
+  Future<void> clear() async {
+    if (locked) throw lockedError();
+    return super.clear();
   }
 }
 
@@ -397,5 +448,11 @@ class FakeKeychain implements DakKeychain {
   Future<void> delete(String key) async {
     _check();
     items.remove(key);
+  }
+
+  @override
+  Future<Iterable<String>> keys() async {
+    _check();
+    return [for (final e in items.entries) if (!e.value.legacy) e.key];
   }
 }

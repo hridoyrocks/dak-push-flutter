@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:dak_push/dak_push.dart';
 import 'package:dak_push/src/background.dart';
+import 'package:dak_push/src/client.dart' show kDakSdkVersion;
 import 'package:dak_push/src/messaging.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -130,7 +131,7 @@ void main() {
       expect(sent.single.url.toString(), 'https://push.test/v1/apps/app-1/devices/dev-1/delivered');
       expect(sent.single.headers['Authorization'], startsWith('Device secret-'));
       expect(jsonDecode(sent.single.body), {'message_ids': ['m9']});
-      expect(h.storage.receipts, isNull);
+      expect(h.storage.receipts, isEmpty);
 
       // Pushes from other services are ignored.
       await reportDelivery({'type': 'x'}, storage: h.storage, client: client);
@@ -144,17 +145,17 @@ void main() {
       await reportDelivery({'_dak_id': 'b1'}, storage: h.storage, client: offline);
       await reportDelivery({'_dak_id': 'b2'}, storage: h.storage, client: offline);
       await reportDelivery({'_dak_id': 'b1'}, storage: h.storage, client: offline);
-      expect(jsonDecode(h.storage.receipts!), ['b1', 'b2']);
+      expect(h.storage.receipts, ['b1', 'b2']);
 
       await h.client.onResume();
       expect(h.server.delivered, ['b1', 'b2']);
-      expect(h.storage.receipts, '');
+      expect(h.storage.receipts, isEmpty);
     });
 
     test('before the first registration the receipt waits too', () async {
       final storage = MemoryDakStorage();
       await reportDelivery({'_dak_id': 'early'}, storage: storage, client: MockClient((_) async => http.Response('', 204)));
-      expect(jsonDecode(storage.receipts!), ['early']);
+      expect(storage.receipts, ['early']);
       final h = Harness(storage: storage);
       await h.start();
       expect(h.server.delivered, ['early']);
@@ -165,7 +166,7 @@ void main() {
       await h.start();
       final refuse = MockClient((_) async => http.Response('{"error":{"code":"invalid","message":"x"}}', 422));
       await reportDelivery({'_dak_id': 'x1'}, storage: h.storage, client: refuse);
-      expect(h.storage.receipts, isNull);
+      expect(h.storage.receipts, isEmpty);
     });
   });
 
@@ -230,7 +231,9 @@ void main() {
     test('is sent only when the app opts in, and again when it changes', () async {
       final off = Harness();
       await off.start();
-      expect(off.server.requests.single.body.containsKey('utc_offset_minutes'), isFalse);
+      // Sent as null, so a row this install takes over loses an old offset.
+      expect(off.server.requests.single.body['utc_offset_minutes'], isNull);
+      expect(off.server.requests.single.body.containsKey('utc_offset_minutes'), isTrue);
 
       final h = Harness(shareTimezoneOffset: true);
       await h.start();
@@ -306,7 +309,7 @@ void main() {
     expect(h.server.opened, ['old-open']);
     final patch = h.server.requests.first.body;
     expect(patch.containsKey('token'), isFalse, reason: 'an unchanged token keeps its (default) type');
-    expect(patch['sdk_version'], '0.3.1');
+    expect(patch['sdk_version'], kDakSdkVersion);
     final saved = jsonDecode(storage.value!) as Map<String, dynamic>;
     expect(saved['v'], 2);
     expect(saved['base_url'], 'https://push.test');

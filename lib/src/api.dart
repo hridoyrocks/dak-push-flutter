@@ -1,12 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show HttpDate;
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
 /// An error answer from the Dak server.
 class DakApiException implements Exception {
-  DakApiException(this.status, this.code, this.message, {this.field, this.fromDak = true});
+  DakApiException(this.status, this.code, this.message, {this.field, this.fromDak = true, this.retryAfter});
 
   final int status;
   final String code;
@@ -19,6 +20,9 @@ class DakApiException implements Exception {
   /// of it (an HTML 403, a 404 page) is not, and is treated as a network
   /// problem: retried, never acted on.
   final bool fromDak;
+
+  /// How long the server asked the SDK to wait (Retry-After on 429 and 503).
+  final Duration? retryAfter;
 
   /// The device is unknown or its secret is wrong: register again.
   bool get isUnauthorized => fromDak && status == 401;
@@ -46,13 +50,28 @@ class Registration {
 
 /// The SDK half of Dak's HTTP API.
 class DakApi {
+  /// [baseUrl] must be https; plain http is allowed only for this computer
+  /// (localhost, 127.0.0.1, ::1) and the Android emulator's 10.0.2.2.
   DakApi({
     required String baseUrl,
     required this.appId,
     http.Client? client,
     this.timeout = const Duration(seconds: 15),
-  })  : baseUrl = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl,
+  })  : baseUrl = checkBaseUrl(baseUrl),
         _http = client ?? http.Client();
+
+  static const _localHosts = {'localhost', '127.0.0.1', '::1', '10.0.2.2'};
+
+  /// Returns [url] without a trailing slash, or throws an ArgumentError when
+  /// it is not https (the device secret travels in every request).
+  static String checkBaseUrl(String url) {
+    final uri = Uri.tryParse(url);
+    final ok = uri != null &&
+        uri.host.isNotEmpty &&
+        (uri.scheme == 'https' || (uri.scheme == 'http' && _localHosts.contains(uri.host)));
+    if (!ok) throw ArgumentError.value(url, 'baseUrl', 'must be an https URL like https://push.example.com');
+    return url.endsWith('/') ? url.substring(0, url.length - 1) : url;
+  }
 
   final String baseUrl;
   final String appId;
@@ -113,13 +132,15 @@ class DakApi {
       final js = jsonDecode(res.body);
       if (js is Map) err = js['error'];
     } catch (_) {}
+    final retryAfter = parseRetryAfter(res.headers['retry-after']);
     if (err is Map && err['code'] is String) {
       final message = err['message'];
       final field = err['field'];
       throw DakApiException(res.statusCode, err['code'] as String, message is String ? message : '',
-          field: field is String && field.isNotEmpty ? field : null);
+          field: field is String && field.isNotEmpty ? field : null, retryAfter: retryAfter);
     }
-    throw DakApiException(res.statusCode, 'http_${res.statusCode}', res.reasonPhrase ?? '', fromDak: false);
+    throw DakApiException(res.statusCode, 'http_${res.statusCode}', res.reasonPhrase ?? '',
+        fromDak: false, retryAfter: retryAfter);
   }
 
   /// Sends [req] and reads the whole answer within [timeout]. A server that
@@ -154,5 +175,18 @@ class DakApi {
       persistentConnection: streamed.persistentConnection,
       reasonPhrase: streamed.reasonPhrase,
     );
+  }
+}
+
+/// Retry-After as seconds or as an HTTP date; null when absent or unreadable.
+Duration? parseRetryAfter(String? value, {DateTime? now}) {
+  if (value == null || value.trim().isEmpty) return null;
+  final seconds = int.tryParse(value.trim());
+  if (seconds != null) return seconds < 0 ? null : Duration(seconds: seconds);
+  try {
+    final wait = HttpDate.parse(value.trim()).difference(now ?? DateTime.now());
+    return wait.isNegative ? Duration.zero : wait;
+  } catch (_) {
+    return null;
   }
 }
