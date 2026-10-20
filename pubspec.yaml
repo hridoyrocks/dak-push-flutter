@@ -1,9 +1,9 @@
 name: dak_push
 description: Flutter SDK for Dak, a self-hosted push notification server. Registers the device, links your user, keeps tags, reports deliveries, opens and button taps, and shows in-app messages.
 version: 0.3.0
-homepage: https://github.com/hridoyrocks/dak-push
-repository: https://github.com/hridoyrocks/dak-push/tree/main/sdk/flutter/dak_push
-issue_tracker: https://github.com/hridoyrocks/dak-push/issues
+homepage: https://github.com/hridoyrocks/dak-push-flutter
+repository: https://github.com/hridoyrocks/dak-push-flutter
+issue_tracker: https://github.com/hridoyrocks/dak-push-flutter/issues
 topics:
   - push-notifications
   - notifications
@@ -15,7 +15,7 @@ environment:
   flutter: ">=3.22.0"
 
 # Wide ranges on purpose, so the SDK fits into apps that already use these
-# plugins (Amar Partner is on firebase_messaging 15).
+# plugins (some are still on firebase_messaging 15).
 dependencies:
   flutter:
     sdk: flutter

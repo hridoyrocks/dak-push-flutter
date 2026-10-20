@@ -22,7 +22,7 @@ and nothing else). The device secret stays in the app's keychain.
 
 1. **App Group.** In Xcode, select the Runner target → Signing & Capabilities →
    \+ Capability → App Groups → add one, for example
-   `group.com.amarpartner.app.dak`.
+   `group.com.example.app.dak`.
 
 2. **Extension target.** File → New → Target → Notification Service
    Extension. Name it `DakNotificationService`, language Swift. When Xcode
@@ -30,7 +30,7 @@ and nothing else). The device secret stays in the app's keychain.
    - Set its deployment target to the app's (Runner's) or lower.
    - Give it the same App Group (Signing & Capabilities → App Groups).
    - Its bundle id must start with the app's, like
-     `com.amarpartner.app.DakNotificationService`, and it needs its own
+     `com.example.app.DakNotificationService`, and it needs its own
      provisioning profile (Xcode's automatic signing makes one).
 
 3. **Code.** Copy `DakNotificationService.swift` from this package
@@ -49,7 +49,7 @@ and nothing else). The device secret stays in the app's keychain.
 
    ```xml
    <key>DakAppGroup</key>
-   <string>group.com.amarpartner.app.dak</string>
+   <string>group.com.example.app.dak</string>
    ```
 
 5. **Flutter.** Pass the same group to the SDK:
@@ -58,7 +58,7 @@ and nothing else). The device secret stays in the app's keychain.
    await Dak.init(
      appId: 'APP_ID',
      baseUrl: 'https://push.example.com',
-     options: const DakOptions(iosAppGroup: 'group.com.amarpartner.app.dak'),
+     options: const DakOptions(iosAppGroup: 'group.com.example.app.dak'),
    );
    ```
 

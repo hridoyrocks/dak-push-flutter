@@ -1,7 +1,6 @@
 # dak_push
 
-Flutter SDK for [Dak](https://github.com/hridoyrocks/dak-push), a self-hosted
-push notification server. It registers the device with your Dak server, links
+Flutter SDK for Dak, a self-hosted push notification server. It registers the device with your Dak server, links
 it to your user, keeps tags, reports deliveries, opens and button taps, and
 shows in-app messages.
 
@@ -11,10 +10,17 @@ firebase_messaging 15, 16 and 17.
 
 ## Install
 
+Until the package is on pub.dev, add it from this repository:
+
 ```yaml
 dependencies:
-  dak_push: ^0.3.0
+  dak_push:
+    git:
+      url: https://github.com/hridoyrocks/dak-push-flutter.git
 ```
+
+`pubspec.lock` keeps the exact commit; `flutter pub upgrade dak_push` takes
+the newest.
 
 The app needs Firebase set up as usual (`google-services.json`,
 `GoogleService-Info.plist`, Push Notifications capability on iOS). Remove
@@ -129,9 +135,8 @@ it the app's timezone (set on the server) is used.
 Messages shown inside the app while it is open: a centred modal, a top or
 bottom banner, a full-screen page or a card that slides up. They are drawn with
 plain Flutter widgets (no WebView) and take your theme's colours unless the
-message sets its own. Create them with the REST API (`POST /v1/in-app`, see
-[`docs/openapi.yaml`](../../../docs/openapi.yaml)); push permission is not
-needed to see them.
+message sets its own. Create them in the Dak dashboard or with the server's
+REST API (`POST /v1/in-app`); push permission is not needed to see them.
 
 Give them a place above all your pages, in `MaterialApp`'s builder:
 

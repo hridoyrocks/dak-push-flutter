@@ -6,7 +6,7 @@ The repository keeps only `lib/` and `pubspec.yaml`. Generate the platform
 folders and Firebase config once:
 
 ```bash
-cd sdk/flutter/dak_push/example
+cd example
 flutter create . --platforms android,ios --org com.example.dak
 flutterfire configure   # pick the Firebase project whose service account the Dak app uses
 ```
