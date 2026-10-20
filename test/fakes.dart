@@ -73,7 +73,7 @@ class FakeServer {
     }
     if (req.method == 'PATCH') {
       _apply(d, body);
-      return _json(200, {'device': {}});
+      return _json(200, {'device': <String, Object?>{}});
     }
     if (req.method == 'POST' && parts.length == 7 && parts[6] == 'opened') {
       opened.add(body['message_id'] as String);

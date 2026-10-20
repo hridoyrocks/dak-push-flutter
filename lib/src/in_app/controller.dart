@@ -35,7 +35,7 @@ class _Local {
         if (interrupted) 'interrupted': true,
       };
 
-  static _Local fromJson(Map js) => _Local(
+  static _Local fromJson(Map<Object?, Object?> js) => _Local(
         shown: js['shown'] is num ? (js['shown'] as num).toInt() : 0,
         last: js['last'] is String ? DateTime.tryParse(js['last'] as String) : null,
         session: js['session'] is num ? (js['session'] as num).toInt() : 0,

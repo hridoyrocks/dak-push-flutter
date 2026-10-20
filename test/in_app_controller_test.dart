@@ -617,7 +617,8 @@ void main() {
     final js = jsonDecode(storage.value!) as Map<String, dynamic>;
     expect(js['sessions'], 2);
     expect((js['local'] as Map).keys, unorderedEquals(['a', 'b']));
-    expect([for (final e in js['events'] as List) '${e['type']} ${e['message_id']}'], ['impression a', 'impression b']);
+    expect([for (final e in (js['events'] as List).cast<Map<String, Object?>>()) '${e['type']} ${e['message_id']}'],
+        ['impression a', 'impression b']);
 
     await c.flushEvents();
     expect(second.eventTypes, ['impression a', 'impression b']);

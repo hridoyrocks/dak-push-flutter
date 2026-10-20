@@ -77,7 +77,7 @@ void main() {
       final h = Harness(installMarker: marker);
       await h.start();
       expect(marker.value, hasLength(32));
-      expect(jsonDecode(h.storage.value!)['install'], marker.value);
+      expect((jsonDecode(h.storage.value!) as Map<String, Object?>)['install'], marker.value);
       expect(h.client.reinstalled, isFalse);
     });
 
@@ -115,7 +115,7 @@ void main() {
       expect(second.server.requests.single.body['external_id'], isNull);
       expect(second.server.delivered, isEmpty);
       expect(storage.receipts, isEmpty);
-      expect(jsonDecode(storage.value!)['install'], marker.value);
+      expect((jsonDecode(storage.value!) as Map<String, Object?>)['install'], marker.value);
     });
 
     test('state from SDK 0.3 (no install id) is kept and marked', () async {
@@ -123,7 +123,7 @@ void main() {
       final old = Harness(storage: storage);
       await old.start();
       await old.client.login('7');
-      expect(jsonDecode(storage.value!).containsKey('install'), isFalse);
+      expect((jsonDecode(storage.value!) as Map<String, Object?>).containsKey('install'), isFalse);
 
       final marker = MemoryStateStore();
       final upgraded = Harness(storage: storage, installMarker: marker);
@@ -132,7 +132,7 @@ void main() {
       expect(upgraded.client.reinstalled, isFalse);
       expect(upgraded.client.externalId, '7');
       expect(marker.value, isNotNull);
-      expect(jsonDecode(storage.value!)['install'], marker.value);
+      expect((jsonDecode(storage.value!) as Map<String, Object?>)['install'], marker.value);
     });
   });
 
@@ -248,7 +248,7 @@ void main() {
       final before = h.server.requests.length;
       await c.setTags({'b': '2'});
       expect(h.server.requests.length, before, reason: 'the server asked for two minutes');
-      expect(jsonDecode(h.storage.value!)['tags'], {'a': '1', 'b': '2'});
+      expect((jsonDecode(h.storage.value!) as Map<String, Object?>)['tags'], {'a': '1', 'b': '2'});
 
       h.now = h.now.add(const Duration(minutes: 3));
       await c.flush();
