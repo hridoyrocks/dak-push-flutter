@@ -109,6 +109,12 @@ class _Parts {
   bool get hasTitle => c.title?.trim().isNotEmpty ?? false;
   bool get hasBody => c.body?.trim().isNotEmpty ?? false;
 
+  /// The X, also when the message turned it off but has no other way out (a
+  /// fullscreen message with no buttons and nothing to tap; iOS has no back
+  /// button).
+  bool get showClose =>
+      c.closeButton || (m.layout == DakInAppLayout.fullscreen && c.buttons.isEmpty && c.clickAction == null);
+
   Widget title({TextAlign align = TextAlign.center, TextStyle? style, int? maxLines}) => Text(
         c.title!,
         textAlign: align,
@@ -202,7 +208,7 @@ class _Parts {
 
   Widget _withClose(Widget child, {double top = 4}) => Stack(children: [
         child,
-        if (c.closeButton) Positioned(top: top, right: 4, child: close()),
+        if (showClose) Positioned(top: top, right: 4, child: close()),
       ]);
 
   Widget _tappable(Widget child) => c.clickAction == null ? child : InkWell(onTap: () => onClick(null), child: child);
@@ -316,7 +322,7 @@ class _Parts {
                           ],
                         ),
                       ),
-                      if (c.closeButton) _bannerClose() else const SizedBox(width: 8),
+                      if (showClose) _bannerClose() else const SizedBox(width: 8),
                     ]),
                   )),
                 ),

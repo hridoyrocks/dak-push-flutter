@@ -63,9 +63,21 @@ Dak.onForeground.listen((n) => n.isSilent ? sync(n.data) : showInAppBanner(n.tit
 await Dak.setBadge(0); // iOS
 ```
 
+`Dak.init` returns once the saved state and the tapped notification are read;
+the push token and the registration follow in the background, so a bad network
+never holds the splash screen. Calls made meanwhile (`login`, `setTags`) wait
+for the saved state and then sync. Taps that come before you listen to
+`onOpened` are kept for your first listener.
+
 `login` and `setTags` throw `DakException` only for mistakes the app must fix
-(wrong auth hash, bad tag). Network problems never throw: changes are saved and
-sent later, also after an app restart.
+(wrong auth hash, bad tag). Only the refused field is rolled back: an opt-out
+sent with a wrong auth hash still goes through. Network problems never throw:
+changes are saved and sent later, also after an app restart. Refusals from
+syncs nobody awaits (a retry, a token refresh) come on `Dak.onError`:
+
+```dart
+Dak.onError.listen((e) => log('dak refused ${e.field ?? e.code}: ${e.message}'));
+```
 
 ## Delivered receipts
 

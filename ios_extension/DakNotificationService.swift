@@ -74,10 +74,14 @@ open class DakNotificationService: UNNotificationServiceExtension {
     contentHandler?(content)
   }
 
-  private func edit(_ change: (UNMutableNotificationContent) -> Void) {
+  /// False when the notification was already handed back (time ran out).
+  @discardableResult
+  private func edit(_ change: (UNMutableNotificationContent) -> Void) -> Bool {
     lock.lock()
     defer { lock.unlock() }
-    if !finished, let content = content { change(content) }
+    guard !finished, let content = content else { return false }
+    change(content)
+    return true
   }
 
   // MARK: - Shared settings
@@ -182,24 +186,85 @@ open class DakNotificationService: UNNotificationServiceExtension {
   }
 
   private func attachImage(_ url: URL, done: @escaping () -> Void) {
-    URLSession.shared.downloadTask(with: url) { location, response, _ in
+    DakImageDownload.start(url) { file in
       defer { done() }
-      guard let location = location else { return }
-      let ext: String
-      switch (response as? HTTPURLResponse)?.mimeType ?? "" {
-      case "image/png": ext = "png"
-      case "image/gif": ext = "gif"
-      case "image/jpeg", "image/jpg": ext = "jpg"
-      default: ext = url.pathExtension.isEmpty ? "jpg" : url.pathExtension
+      guard let file = file else { return }
+      var attached = false
+      if let attachment = try? UNNotificationAttachment(identifier: "image", url: file, options: nil) {
+        attached = self.edit { $0.attachments = [attachment] }
       }
-      let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "." + ext)
-      do {
-        try FileManager.default.moveItem(at: location, to: file)
-        let attachment = try UNNotificationAttachment(identifier: "image", url: file, options: nil)
-        self.edit { $0.attachments = [attachment] }
-      } catch {
-        // Not an image iOS can show: the notification goes without it.
-      }
-    }.resume()
+      // iOS moves an attached file away; one it never got is ours to delete.
+      if !attached { try? FileManager.default.removeItem(at: file) }
+    }
+  }
+}
+
+/// Downloads a notification image into a temporary file, within a time and
+/// a size limit, so a slow or huge image cannot hold the push back.
+private final class DakImageDownload: NSObject, URLSessionDownloadDelegate {
+  /// iOS's own limit for an image attachment.
+  static let maxBytes: Int64 = 10 * 1024 * 1024
+
+  private let completion: (URL?) -> Void
+  private var file: URL?
+
+  private init(completion: @escaping (URL?) -> Void) {
+    self.completion = completion
+  }
+
+  /// [completion] gets the file, or nil, exactly once.
+  static func start(_ url: URL, completion: @escaping (URL?) -> Void) {
+    let config = URLSessionConfiguration.ephemeral
+    config.timeoutIntervalForRequest = 10
+    // The whole download; the extension has about 30 s for everything.
+    config.timeoutIntervalForResource = 15
+    config.waitsForConnectivity = false
+    let session = URLSession(configuration: config, delegate: DakImageDownload(completion: completion), delegateQueue: nil)
+    session.downloadTask(with: url).resume()
+    // Lets the task finish, then releases the delegate.
+    session.finishTasksAndInvalidate()
+  }
+
+  func urlSession(
+    _ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
+    totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64
+  ) {
+    if totalBytesWritten > Self.maxBytes || totalBytesExpectedToWrite > Self.maxBytes { downloadTask.cancel() }
+  }
+
+  func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+    // `location` is deleted when this returns.
+    guard let response = downloadTask.response as? HTTPURLResponse, (200..<300).contains(response.statusCode),
+      let ext = Self.fileExtension(response),
+      let size = (try? location.resourceValues(forKeys: [.fileSizeKey]))?.fileSize, size > 0, Int64(size) <= Self.maxBytes
+    else { return }
+    let target = FileManager.default.temporaryDirectory.appendingPathComponent("dak-\(UUID().uuidString).\(ext)")
+    if (try? FileManager.default.moveItem(at: location, to: target)) != nil { file = target }
+  }
+
+  func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+    if error != nil, let file = file {
+      try? FileManager.default.removeItem(at: file)
+      self.file = nil
+    }
+    completion(file)
+  }
+
+  /// An image type, as iOS picks the decoder by the file's extension; nil for
+  /// anything else (an HTML error page from a proxy).
+  private static func fileExtension(_ response: HTTPURLResponse) -> String? {
+    let mime = (response.mimeType ?? "").lowercased()
+    switch mime {
+    case "image/png": return "png"
+    case "image/gif": return "gif"
+    case "image/jpeg", "image/jpg": return "jpg"
+    default: break
+    }
+    let known: Set<String> = ["jpg", "jpeg", "png", "gif"]
+    let pathExt = (response.url?.pathExtension ?? "").lowercased()
+    if mime.hasPrefix("image/") { return known.contains(pathExt) ? pathExt : "jpg" }
+    // Some storage serves images as plain binary.
+    if mime == "application/octet-stream" || mime == "binary/octet-stream", known.contains(pathExt) { return pathExt }
+    return nil
   }
 }
