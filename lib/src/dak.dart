@@ -4,7 +4,6 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'api.dart';
@@ -88,9 +87,14 @@ class Dak {
     return c;
   }
 
-  /// Starts the SDK: gets the push token and registers the device. Safe to
-  /// call more than once. Initializes Firebase if the app has not. Call it
-  /// before runApp, so the back button closes in-app messages first.
+  /// Starts the SDK. Safe to call more than once. Initializes Firebase if
+  /// the app has not. Call it before runApp, so the back button closes
+  /// in-app messages first.
+  ///
+  /// It returns once the saved state and the notification that opened the
+  /// app are read; getting the push token and registering the device go on
+  /// in the background, so a slow network never holds the splash screen.
+  /// Calls like [login] made meanwhile wait for the saved state, then sync.
   static Future<void> init({
     required String appId,
     required String baseUrl,
@@ -120,11 +124,12 @@ class Dak {
     );
     final inApp = DakInAppController(
       api: api,
-      storage: SecureDakStorage(const FlutterSecureStorage(), 'dak_push_in_app'),
+      storage: SecureDakStorage(key: 'dak_push_in_app'),
       credentials: () => client.credentials,
       setTags: client.setTags,
       openUrl: (url) => launchUrl(url, mode: LaunchMode.externalApplication),
       sessionTimeout: options.sessionTimeout,
+      appState: () => WidgetsBinding.instance.lifecycleState,
       log: log,
     );
     _client = client;
@@ -172,7 +177,13 @@ class Dak {
 
   /// Taps on notifications while the app was running in the background.
   /// [DakNotification.actionId] tells which button was tapped, if one was.
+  /// Taps that come before you listen are kept for your first listener.
   static Stream<DakNotification> get onOpened => _c.onOpened;
+
+  /// Changes the server refused, such as a wrong auth hash or a bad tag,
+  /// also from syncs that run in the background. Only the refused field is
+  /// rolled back; the rest (an opt-out above all) is still sent.
+  static Stream<DakException> get onError => _c.onError;
 
   /// Messages that arrive while the app is open, silent ones too (not shown
   /// by the system on Android; show them yourself if you want).

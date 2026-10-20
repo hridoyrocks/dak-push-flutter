@@ -205,9 +205,18 @@ class DakInAppMessage {
       );
 
   /// Reads a message from the server's JSON. Returns null for anything this
-  /// SDK version does not understand (a newer layout, action or trigger), so
-  /// it is skipped rather than shown wrongly.
+  /// SDK version does not understand (a newer layout, action or trigger) or
+  /// cannot read (a field of the wrong type), so it is skipped rather than
+  /// shown wrongly. Never throws.
   static DakInAppMessage? parse(Object? js) {
+    try {
+      return _parse(js);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static DakInAppMessage? _parse(Object? js) {
     if (js is! Map) return null;
     final id = js['id'];
     final layout = DakInAppLayout.parse(js['layout']);
