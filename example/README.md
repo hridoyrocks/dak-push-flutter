@@ -2,14 +2,26 @@
 
 A one-screen app to try the SDK against a running Dak server.
 
-The repository keeps only `lib/` and `pubspec.yaml`. Generate the platform
-folders and Firebase config once:
+The Android and iOS projects are already set up for the SDK's minimums
+(minSdk 23, and iOS 15 in `ios/Podfile` and the Runner target). Before the
+first run:
 
-```bash
-cd example
-flutter create . --platforms android,ios --org com.example.dak
-flutterfire configure   # pick the Firebase project whose service account the Dak app uses
-```
+1. Optionally change the Android application id
+   (`com.example.dak.dak_push_example`) and the iOS bundle id
+   (`com.example.dak.dakPushExample`) to your own.
+2. Add the Firebase config. `flutterfire configure` registers the app ids in
+   Firebase and writes `google-services.json` and `GoogleService-Info.plist`,
+   which `Dak.init` reads:
+
+   ```bash
+   cd example
+   flutterfire configure   # pick the Firebase project whose service account the Dak app uses
+   ```
+
+3. For pushes on iOS, open `ios/Runner.xcworkspace` in Xcode, pick your team,
+   and add the Push Notifications and Background Modes (Remote notifications)
+   capabilities, as the [README](../README.md#platform-setup) describes. If
+   `pod install` fails, run `pod install --repo-update` in `ios/`.
 
 Then run it with your App ID and server URL:
 

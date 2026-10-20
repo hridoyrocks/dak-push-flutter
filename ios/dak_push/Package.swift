@@ -4,7 +4,7 @@ import PackageDescription
 
 let package = Package(
     name: "dak_push",
-    platforms: [.iOS("13.0")],
+    platforms: [.iOS("15.0")],
     products: [
         .library(name: "dak-push", targets: ["dak_push"])
     ],

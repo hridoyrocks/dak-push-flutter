@@ -1,4 +1,18 @@
-## 0.3.0
+# Changelog
+
+All notable changes to dak_push. Versions follow [semantic versioning](https://semver.org);
+below 1.0 a breaking change raises the minor version. **Breaking** marks
+changes that need code or settings changes in apps.
+
+## Unreleased
+
+- **Breaking:** the minimums are now iOS 15 (podspec and Package.swift) and
+  Android minSdk 23. firebase_messaging 16+ (Firebase iOS SDK 12) and
+  flutter_secure_storage 10 already needed them; apps below must raise their
+  deployment target and `minSdk`. See the README's Requirements.
+- The example app has its Android and iOS projects.
+
+## 0.3.0 - 2026-10-20
 
 - Delivered receipts: a background message handler on Android (or
   `Dak.handleBackgroundMessage` from your own), the foreground stream, and a
@@ -12,12 +26,13 @@
 - Opt-in UTC offset for local-time delivery (`shareTimezoneOffset`).
 - `Dak.setBadge`, `Dak.clearBadge`, `Dak.showNotification`, silent pushes in
   `onForeground` (`isSilent`).
-- `DakMessaging` now returns `DakPushToken` (value and type), and
-  `DakPlatformInfo` has `utcOffsetMinutes()`; `DakStorage` keeps receipts.
+- **Breaking** for apps with their own `DakMessaging`, `DakPlatformInfo` or
+  `DakStorage`: `DakMessaging` now returns `DakPushToken` (value and type),
+  `DakPlatformInfo` has `utcOffsetMinutes()`, and `DakStorage` keeps receipts.
 - The SDK version reported to the server is 0.3.0: the server shows Android
   buttons only from this version on.
 
-## 0.2.0
+## 0.2.0 - 2026-10-20
 
 - In-app messages: modal, top/bottom banner, full-screen and card layouts in
   plain Flutter widgets; buttons with deep link, URL, tag, dismiss and custom
@@ -29,7 +44,7 @@
   `Dak.onInAppClick`, `DakOptions.sessionTimeout`.
 - New dependency: url_launcher 6 (opens `url` actions).
 
-## 0.1.0
+## 0.1.0 - 2026-10-20
 
 - First version: registration, login/logout with identity hash, tags,
   subscribe/unsubscribe, permission prompt, open tracking, foreground stream,
