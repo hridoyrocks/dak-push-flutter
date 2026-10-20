@@ -7,10 +7,19 @@ import 'package:http/http.dart' as http;
 
 /// An error answer from the Dak server.
 class DakApiException implements Exception {
+  /// Creates an error with the HTTP [status], the error [code] and [message].
   DakApiException(this.status, this.code, this.message, {this.field, this.fromDak = true, this.retryAfter});
 
+  /// The HTTP status code of the answer.
   final int status;
+
+  /// The server's error code, like `identity_verification_failed`. For an
+  /// answer that is not Dak's own JSON error, `http_` and the status, like
+  /// `http_403`.
   final String code;
+
+  /// A description for developers: the server's message, or the HTTP reason
+  /// phrase.
   final String message;
 
   /// The request field the server refused, like `tags` or `external_id`.
@@ -37,14 +46,26 @@ class DakApiException implements Exception {
 
 /// The in-app messages for a device, with the ETag to send next time.
 class InAppList {
+  /// Wraps the server's answer.
   InAppList(this.messages, this.etag);
+
+  /// The messages as JSON, parsed later one by one.
   final List<Object?> messages;
+
+  /// The ETag to send as If-None-Match on the next fetch.
   final String? etag;
 }
 
+/// What the server answers to a registration.
 class Registration {
+  /// Wraps the server's answer.
   Registration(this.deviceId, this.deviceSecret);
+
+  /// The device's id on the server.
   final String deviceId;
+
+  /// The secret that authorizes later calls for this device. Keep it in secure
+  /// storage.
   final String deviceSecret;
 }
 
@@ -73,19 +94,26 @@ class DakApi {
     return url.endsWith('/') ? url.substring(0, url.length - 1) : url;
   }
 
+  /// The server URL, checked by [checkBaseUrl], without a trailing slash.
   final String baseUrl;
+
+  /// The Dak app's id.
   final String appId;
+
+  /// The time a request may take, sending and reading the answer together.
   final Duration timeout;
   final http.Client _http;
 
   Uri _uri(String path) => Uri.parse('$baseUrl/v1/apps/$appId$path');
 
+  /// Registers this device and returns its id and secret.
   Future<Registration> register(Map<String, Object?> body) async {
     final res = await _send('POST', _uri('/devices'), body, null);
     final js = jsonDecode(res.body) as Map<String, dynamic>;
     return Registration(js['device_id'] as String, js['device_secret'] as String);
   }
 
+  /// Sends changes to the device (token, user, tags, subscription, and so on).
   Future<void> update(String deviceId, String secret, Map<String, Object?> body) async {
     await _send('PATCH', _uri('/devices/$deviceId'), body, secret);
   }
@@ -113,6 +141,7 @@ class DakApi {
     return InAppList((js['messages'] as List?) ?? const [], res.headers['etag']);
   }
 
+  /// Reports in-app impressions, clicks and dismissals.
   Future<void> sendInAppEvents(String deviceId, String secret, List<Map<String, Object?>> events) async {
     await _send('POST', _uri('/devices/$deviceId/in-app/events'), {'events': events}, secret);
   }

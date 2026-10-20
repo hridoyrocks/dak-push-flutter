@@ -116,7 +116,9 @@ String? actionIdentifierOf(dynamic message) {
   }
 }
 
+/// [DakMessaging] on firebase_messaging 15, 16 and 17.
 class FirebaseDakMessaging implements DakMessaging {
+  /// Creates the Firebase messaging; [useFid] picks FIDs over tokens on 17.
   FirebaseDakMessaging({this.useFid = true});
 
   /// Use Firebase Installation IDs when firebase_messaging has them (17+).
@@ -124,6 +126,7 @@ class FirebaseDakMessaging implements DakMessaging {
 
   FirebaseMessaging get _fm => FirebaseMessaging.instance;
 
+  /// Reads Firebase's [RemoteMessage] as a [DakNotification].
   static DakNotification convert(RemoteMessage m) => DakNotification.fromData(
         m.data,
         title: m.notification?.title,

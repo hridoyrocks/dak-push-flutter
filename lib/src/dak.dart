@@ -18,7 +18,9 @@ import 'notification.dart';
 import 'platform_info.dart';
 import 'storage.dart';
 
+/// Settings for [Dak.init]. All of them have defaults.
 class DakOptions {
+  /// Creates the options; see each field for what it does.
   const DakOptions({
     this.showInForegroundOnIOS = false,
     this.debugLogs = false,
@@ -74,6 +76,7 @@ class DakOptions {
 class DakOnce {
   Future<void>? _run;
 
+  /// Runs [start] unless a run is going or has finished, and returns that run.
   Future<void> call(Future<void> Function() start) => _run ??= start().then((_) {}, onError: (Object e, StackTrace s) {
         _run = null;
         Error.throwWithStackTrace(e, s);
@@ -207,12 +210,24 @@ class Dak {
   static Future<void> login(String externalId, {String? authHash}) =>
       _c.login(externalId, authHash: authHash);
 
+  /// Unlinks the user from this device and removes its tags, so the next user
+  /// of the phone starts without them. Push permission and the subscription
+  /// stay.
   static Future<void> logout() => _c.logout();
 
+  /// Sets tags on this device; a null or empty value removes the tag. Values
+  /// are strings, numbers or booleans, sent as strings.
+  ///
+  /// Throws an [ArgumentError] for a bad key (1-64 of `A-Z a-z 0-9 _ . : -`), a
+  /// value over 255 bytes of UTF-8, or more than 50 tags. Network problems
+  /// never throw: the change is saved and sent later.
   static Future<void> setTags(Map<String, Object?> tags) => _c.setTags(tags);
 
+  /// Removes the tags with these keys.
   static Future<void> deleteTags(List<String> keys) => _c.deleteTags(keys);
 
+  /// Opts this device out of (false) or back into (true) all pushes, for a
+  /// switch in your app's settings. Notification permission is not changed.
   static Future<void> setSubscribed(bool subscribed) => _c.setSubscribed(subscribed);
 
   /// iOS: sets the app icon badge; pushes with badge_increment add to it
@@ -220,6 +235,7 @@ class Dak {
   /// notifications themselves, so this does nothing there.
   static Future<void> setBadge(int count) => _c.setBadge(count);
 
+  /// iOS: clears the app icon badge, the same as `setBadge(0)`.
   static Future<void> clearBadge() => _c.setBadge(0);
 
   /// Android: shows a message that arrived while the app was open the way
@@ -260,6 +276,8 @@ class Dak {
   /// instead of FirebaseMessaging.getInitialMessage, which only answers once.
   static DakNotification? get initialNotification => _c.initialNotification;
 
+  /// This device's id on the Dak server, or null before it is registered.
+  /// Useful to find the device in the dashboard.
   static String? get deviceId => _client?.deviceId;
 
   // ---- in-app messages
@@ -277,12 +295,16 @@ class Dak {
   /// on the phone and are forgotten when the app closes.
   static void addTrigger(String key, Object value) => _i.addTriggers({key: value});
 
+  /// Sets several triggers at once; see [addTrigger].
   static void addTriggers(Map<String, Object> triggers) => _i.addTriggers(triggers);
 
+  /// Removes a trigger set with [addTrigger].
   static void removeTrigger(String key) => _i.removeTriggers([key]);
 
+  /// Removes several triggers.
   static void removeTriggers(List<String> keys) => _i.removeTriggers(keys);
 
+  /// Removes all triggers.
   static void clearTriggers() => _i.clearTriggers();
 
   /// Stops (true) or allows (false) in-app messages, for example during a
@@ -290,6 +312,8 @@ class Dak {
   /// [DakInAppBlock] instead.
   static void pauseInApp(bool paused) => _i.setPaused(paused);
 
+  /// Whether in-app messages are paused, by [pauseInApp] or a [DakInAppBlock]
+  /// on screen.
   static bool get isInAppPaused => _i.isPaused;
 
   /// Taps on in-app messages and their buttons. Deep links are yours to

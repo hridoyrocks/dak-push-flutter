@@ -8,7 +8,10 @@ import 'package:meta/meta.dart';
 
 /// One string kept between app starts.
 abstract class DakStateStore {
+  /// The stored string, or null when nothing is stored.
   Future<String?> read();
+
+  /// Replaces the stored string.
   Future<void> write(String value);
 }
 
@@ -38,11 +41,14 @@ abstract class DakStorage implements DakStateStore {
 /// The keychain calls [SecureDakStorage] makes: flutter_secure_storage in
 /// the app, a fake in tests.
 abstract class DakKeychain {
+  /// The item under [key], or null.
   Future<String?> read(String key);
 
   /// iOS: the item as SDK 0.3.0 and earlier saved it (readable only while
   /// the phone is unlocked); null elsewhere.
   Future<String?> readLegacy(String key);
+
+  /// Saves [value] under [key].
   Future<void> write(String key, String value);
 
   /// Removes the item whatever its accessibility.
@@ -52,7 +58,9 @@ abstract class DakKeychain {
   Future<Iterable<String>> keys();
 }
 
+/// [DakKeychain] on flutter_secure_storage.
 class FlutterDakKeychain implements DakKeychain {
+  /// Uses [FlutterSecureStorage] unless another is given (tests).
   FlutterDakKeychain([this._storage = const FlutterSecureStorage()]);
 
   /// After the first unlock since the phone started, so a push or a
@@ -85,6 +93,7 @@ class FlutterDakKeychain implements DakKeychain {
 
 /// Keychain on iOS, encrypted storage on Android.
 class SecureDakStorage implements DakStorage {
+  /// Keeps the state under [key] in the keychain (a fake one in tests).
   SecureDakStorage({String key = 'dak_push_state', DakKeychain? keychain})
       : _key = key,
         _keychain = keychain ?? FlutterDakKeychain();
@@ -182,8 +191,10 @@ class SecureDakStorage implements DakStorage {
 /// A plain file, written atomically (a temporary file, then a rename). For
 /// state that holds no secret and changes often, like the in-app cache.
 class FileDakStateStore implements DakStateStore {
+  /// Keeps the string in the file at [path].
   FileDakStateStore(this.path);
 
+  /// The file.
   final String path;
   Future<void> _last = Future.value();
 
@@ -213,6 +224,7 @@ class FileDakStateStore implements DakStateStore {
     await tmp.rename(path);
   }
 
+  /// Deletes the file, after any write still going.
   Future<void> delete() async {
     await _last;
     try {

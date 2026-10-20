@@ -43,7 +43,10 @@ abstract class DakNative {
   Future<void> removeExtensionReceipts(String appGroup, List<String> messageIds);
 }
 
+/// [DakNative] through the plugin's method channel.
 class MethodChannelDakNative implements DakNative {
+  /// Creates the channel and listens for the plugin's calls (button taps on
+  /// iOS).
   MethodChannelDakNative() {
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'onAction') {

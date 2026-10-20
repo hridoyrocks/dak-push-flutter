@@ -13,13 +13,20 @@ import 'notification.dart';
 import 'platform_info.dart';
 import 'storage.dart';
 
+/// The SDK version reported to the server. A test checks that it matches
+/// pubspec.yaml, the podspec and build.gradle.
 const kDakSdkVersion = '0.4.0';
 
 /// A problem the app has to fix, such as a wrong auth hash or a bad tag.
 /// Network trouble never throws: changes are kept and sent later.
 class DakException implements Exception {
+  /// Creates an exception with [message] and the error that caused it.
   DakException(this.message, [this.cause]);
+
+  /// What went wrong, for developers.
   final String message;
+
+  /// The underlying error, usually a [DakApiException] from the server.
   final Object? cause;
 
   /// The server's error code, like `identity_verification_failed` or

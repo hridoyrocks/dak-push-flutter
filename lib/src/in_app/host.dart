@@ -20,8 +20,10 @@ typedef DakImageLoader = Future<bool> Function(BuildContext context, String url)
 /// It may be built before `Dak.init` finishes. With more than one host in
 /// the tree, the first one draws the messages.
 class DakInAppHost extends StatefulWidget {
+  /// Shows in-app messages above [child].
   const DakInAppHost({super.key, required this.child, this.controller, this.imageLoader});
 
+  /// The app: the child that MaterialApp's builder gets.
   final Widget child;
 
   /// Defaults to the one `Dak.init` made.
@@ -213,9 +215,13 @@ class _DakInAppHostState extends State<DakInAppHost> {
 /// hidden and comes back afterwards; what is due shows after the screen goes
 /// away.
 class DakInAppBlock extends StatefulWidget {
+  /// Keeps in-app messages away while [child] is shown.
   const DakInAppBlock({super.key, required this.child, this.controller});
 
+  /// The screen to keep free of messages.
   final Widget child;
+
+  /// Defaults to the one `Dak.init` made.
   final DakInAppController? controller;
 
   @override

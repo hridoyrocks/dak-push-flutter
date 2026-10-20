@@ -25,12 +25,17 @@ ImageProvider dakInAppImage(BuildContext context, DakInAppMessage m) {
 /// Draws one in-app message in its layout with plain Flutter widgets.
 /// Colours the message leaves out come from the app's theme.
 class DakInAppView extends StatefulWidget {
+  /// Draws [message]; [onClick] and [onDismiss] report what the user did.
   const DakInAppView({super.key, required this.message, required this.onClick, required this.onDismiss});
 
+  /// The message to draw.
   final DakInAppMessage message;
 
   /// A button, or null for a tap on the message itself.
   final void Function(DakInAppButton? button) onClick;
+
+  /// The user closed the message (the X, a tap outside, a swipe, back, or
+  /// auto-dismiss).
   final VoidCallback onDismiss;
 
   @override

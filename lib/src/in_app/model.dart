@@ -2,17 +2,31 @@ import 'dart:ui' show Color;
 
 /// How an in-app message is laid out on screen.
 enum DakInAppLayout {
+  /// A centred dialog over a dimmed app.
   modal('modal'),
+
+  /// A banner at the top; the app stays usable.
   bannerTop('banner_top'),
+
+  /// A banner at the bottom; the app stays usable.
   bannerBottom('banner_bottom'),
+
+  /// A page that covers the app.
   fullscreen('fullscreen'),
+
+  /// A card that slides up from the bottom.
   card('card');
 
+  /// A layout with its name on the wire.
   const DakInAppLayout(this.wire);
+
+  /// The name the server uses, like `banner_top`.
   final String wire;
 
+  /// Whether this is a top or bottom banner.
   bool get isBanner => this == bannerTop || this == bannerBottom;
 
+  /// The layout with this wire name, or null for one this SDK does not know.
   static DakInAppLayout? parse(Object? v) {
     for (final l in values) {
       if (l.wire == v) return l;
@@ -24,17 +38,22 @@ enum DakInAppLayout {
 /// What a click does. Every click also closes the message and is reported
 /// through `Dak.onInAppClick`.
 class DakInAppAction {
+  /// Creates an action of [type].
   const DakInAppAction({required this.type, this.url, this.tags = const {}});
 
   /// deep_link | url | tags | dismiss | custom
   final String type;
+
+  /// For `deep_link` and `url`: the link.
   final String? url;
 
   /// For `tags`: tags to set; an empty value removes the tag.
   final Map<String, String> tags;
 
+  /// The action types this SDK knows.
   static const types = {'deep_link', 'url', 'tags', 'dismiss', 'custom'};
 
+  /// Reads an action from JSON; null for an unknown type.
   static DakInAppAction? parse(Object? js) {
     if (js is! Map) return null;
     final type = js['type'];
@@ -48,18 +67,30 @@ class DakInAppAction {
   }
 }
 
+/// A button on an in-app message.
 class DakInAppButton {
+  /// Creates a button.
   const DakInAppButton({required this.id, required this.text, required this.action, this.backgroundColor, this.textColor});
 
   /// The click id: reported in `Dak.onInAppClick` and counted in the stats.
   final String id;
+
+  /// The button's label.
   final String text;
+
+  /// What a tap on the button does.
   final DakInAppAction action;
+
+  /// The button's colour; null takes the theme's.
   final Color? backgroundColor;
+
+  /// The label's colour; null picks one that reads on the background.
   final Color? textColor;
 }
 
+/// What an in-app message shows.
 class DakInAppContent {
+  /// Creates the content.
   const DakInAppContent({
     this.title,
     this.body,
@@ -73,12 +104,26 @@ class DakInAppContent {
     this.buttons = const [],
   });
 
+  /// The title, if any.
   final String? title;
+
+  /// The text, if any.
   final String? body;
+
+  /// The image, loaded before the message shows.
   final String? imageUrl;
+
+  /// The message's background; null takes the theme's.
   final Color? backgroundColor;
+
+  /// The title's colour; null picks one that reads on the background.
   final Color? titleColor;
+
+  /// The text's colour; null picks one that reads on the background.
   final Color? bodyColor;
+
+  /// Whether the message has an X. A fullscreen message with no other way out
+  /// gets one anyway.
   final bool closeButton;
 
   /// Banners only: closes by itself after this long.
@@ -86,10 +131,14 @@ class DakInAppContent {
 
   /// What tapping the message itself does.
   final DakInAppAction? clickAction;
+
+  /// The buttons, at most three.
   final List<DakInAppButton> buttons;
 
+  /// Whether there is a title or text to show without the image.
   bool get hasText => (title?.trim().isNotEmpty ?? false) || (body?.trim().isNotEmpty ?? false);
 
+  /// The same content without the image, for when it failed to load.
   DakInAppContent withoutImage() => DakInAppContent(
         title: title,
         body: body,
@@ -103,15 +152,26 @@ class DakInAppContent {
       );
 }
 
-/// One trigger condition; see `docs/IN_APP.md`.
+/// One condition of an in-app message's trigger. A message's
+/// [DakInAppMessage.triggers] are groups of these.
 class DakInAppCondition {
+  /// Creates a condition.
   const DakInAppCondition({required this.kind, required this.op, this.key, this.value, this.values = const []});
 
   /// session_count | session_time | since_install | custom
   final String kind;
+
+  /// The comparison: `=`, `!=`, `>`, `>=`, `<`, `<=`, and for custom triggers
+  /// also `in`, `exists` and `not_exists`.
   final String op;
+
+  /// For custom conditions: the trigger key set with `Dak.addTrigger`.
   final String? key;
+
+  /// The value to compare with: a count, seconds, or the trigger value.
   final Object? value;
+
+  /// For `in`: the values that match.
   final List<String> values;
 
   static const _ops = {
@@ -121,6 +181,8 @@ class DakInAppCondition {
     'custom': {'=', '!=', '>', '>=', '<', '<=', 'in', 'exists', 'not_exists'},
   };
 
+  /// Reads a condition from JSON; null for a kind or comparison this SDK does
+  /// not know.
   static DakInAppCondition? parse(Object? js) {
     if (js is! Map) return null;
     final kind = js['kind'];
@@ -142,13 +204,19 @@ class DakInAppCondition {
 
 /// How often one device may see a message.
 class DakInAppFrequency {
+  /// Creates a frequency.
   const DakInAppFrequency({required this.type, this.interval = Duration.zero, this.maxDisplays});
 
   /// once | every_session | interval
   final String type;
+
+  /// For `interval`: the time between two showings.
   final Duration interval;
+
+  /// At most this many showings in all; null for no limit.
   final int? maxDisplays;
 
+  /// Reads a frequency from JSON; null for a type this SDK does not know.
   static DakInAppFrequency? parse(Object? js) {
     if (js is! Map) return null;
     final type = js['type'];
@@ -163,6 +231,7 @@ class DakInAppFrequency {
 
 /// An in-app message as the server sent it.
 class DakInAppMessage {
+  /// Creates a message; the SDK reads them with [parse].
   const DakInAppMessage({
     required this.id,
     required this.layout,
@@ -176,21 +245,37 @@ class DakInAppMessage {
     this.lastShownAt,
   });
 
+  /// The message's id.
   final String id;
+
+  /// How the message is laid out.
   final DakInAppLayout layout;
+
+  /// What the message shows.
   final DakInAppContent content;
 
   /// OR-ed groups of AND-ed conditions; empty means "when the app opens".
   final List<List<DakInAppCondition>> triggers;
+
+  /// How often this device may see the message.
   final DakInAppFrequency frequency;
+
+  /// When several messages are due, the highest priority shows first.
   final int priority;
+
+  /// Not shown before this time.
   final DateTime? startAt;
+
+  /// Not shown after this time.
   final DateTime? endAt;
 
   /// How often the server has counted this device showing it.
   final int shown;
+
+  /// When the server last counted this device showing it.
   final DateTime? lastShownAt;
 
+  /// The same message with other [content].
   DakInAppMessage copyWith({DakInAppContent? content}) => DakInAppMessage(
         id: id,
         layout: layout,
@@ -299,12 +384,16 @@ Color? parseColor(Object? v) {
 
 /// A tap on an in-app message or one of its buttons.
 class DakInAppClick {
+  /// Creates a click.
   const DakInAppClick({required this.messageId, required this.action, this.buttonId});
 
+  /// The message that was tapped.
   final String messageId;
 
   /// The button's id, or null when the message itself was tapped.
   final String? buttonId;
+
+  /// What the tap did.
   final DakInAppAction action;
 
   /// deep_link | url | tags | dismiss | custom

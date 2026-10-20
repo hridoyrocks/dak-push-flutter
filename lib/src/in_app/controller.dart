@@ -9,6 +9,7 @@ import '../api.dart';
 import '../storage.dart';
 import 'model.dart';
 
+/// The device's id and secret, which the in-app calls to the server need.
 typedef DakCredentials = ({String deviceId, String secret});
 
 /// The controller `Dak.init` made, for hosts and blocks built before it.
@@ -47,6 +48,7 @@ class _Local {
 /// sessions, checks triggers and frequency, picks what to show, and reports
 /// impressions, clicks and dismissals. [DakInAppHost] draws [current].
 class DakInAppController {
+  /// Creates the controller. `Dak.init` makes the one apps use.
   DakInAppController({
     required this.api,
     required this.storage,
@@ -67,11 +69,17 @@ class DakInAppController {
     _sessionStart = _now();
   }
 
+  /// The server API the messages come from and the events go to.
   final DakApi api;
+
+  /// Keeps the cached messages, the frequency counts and unsent events between
+  /// starts.
   final DakStateStore storage;
 
   /// The device's id and secret, or null before it is registered.
   final DakCredentials? Function() credentials;
+
+  /// Sets tags for `tags` actions.
   final Future<void> Function(Map<String, Object?> tags) setTags;
 
   /// Opens `url` actions; null leaves them to the app's onInAppClick.
@@ -89,6 +97,8 @@ class DakInAppController {
 
   /// How long a session start waits for the server before using the cache.
   final Duration fetchWait;
+
+  /// Session starts closer together than this use the list already fetched.
   final Duration minFetchInterval;
 
   /// Events are sent this long after the last one; null sends only on
@@ -152,13 +162,22 @@ class DakInAppController {
   /// A message is on screen (drawn), so the back button closes it.
   bool get isShowing => current.value != null && _displayed;
 
+  /// Taps on messages and their buttons.
   Stream<DakInAppClick> get onClick => _clicks.stream;
 
   /// Usable messages from the last fetch (or the cache), best first.
   List<DakInAppMessage> get messages => List.unmodifiable(_messages);
+
+  /// How many sessions this install has had, counting the current one.
   int get sessionCount => _sessions;
+
+  /// The triggers set now.
   Map<String, Object> get triggers => Map.unmodifiable(_triggers);
+
+  /// Whether messages are paused, by [setPaused] or a [block].
   bool get isPaused => _paused || _blocks > 0;
+
+  /// How many impressions, clicks and dismissals wait to be sent.
   int get pendingEvents => _events.length;
 
   /// When a time trigger (session_time, since_install) next comes true.
@@ -283,11 +302,13 @@ class DakInAppController {
     _evaluate(queue: true);
   }
 
+  /// Removes the triggers with these keys.
   void removeTriggers(Iterable<String> keys) {
     keys.forEach(_triggers.remove);
     _evaluate(queue: true);
   }
 
+  /// Removes all triggers.
   void clearTriggers() => removeTriggers(_triggers.keys.toList());
 
   /// Checks the triggers again now (also called by timers).
@@ -306,6 +327,7 @@ class DakInAppController {
     _pauseChanged();
   }
 
+  /// Ends one [block].
   void unblock() {
     _blocks = math.max(0, _blocks - 1);
     _pauseChanged();
@@ -342,6 +364,8 @@ class DakInAppController {
     _evaluate();
   }
 
+  /// A host left the tree. If it was drawing, the message on screen is hidden
+  /// and the next host takes over.
   void detach([Object? host]) {
     final h = host ?? _defaultHost;
     final wasActive = _hosts.isNotEmpty && identical(_hosts.first, h);
@@ -433,6 +457,8 @@ class DakInAppController {
 
   // ---- lifecycle
 
+  /// Follows the app lifecycle: going to the background sends pending events,
+  /// and coming back after [sessionTimeout] starts a new session.
   void lifecycle(AppLifecycleState state) {
     if (!_started) return;
     switch (state) {
@@ -778,6 +804,7 @@ class DakInAppController {
     }
   }
 
+  /// Stops the timers and closes [onClick].
   Future<void> dispose() async {
     _timer?.cancel();
     _eventTimer?.cancel();

@@ -4,6 +4,7 @@ import 'dart:async';
 /// to the next listener, so a tap that comes before the app subscribes (in
 /// main, or while Dak.init runs) is not lost.
 class BufferedBroadcast<T> {
+  /// Creates a stream that keeps at most [limit] events while nobody listens.
   BufferedBroadcast({this.limit = 20}) {
     _ctl = StreamController<T>.broadcast(onListen: _drain);
   }
@@ -13,8 +14,11 @@ class BufferedBroadcast<T> {
   late final StreamController<T> _ctl;
   final _held = <T>[];
 
+  /// The broadcast stream. The first listener gets the events kept so far.
   Stream<T> get stream => _ctl.stream;
 
+  /// Sends [event] to the listeners, or keeps it when there are none. Does
+  /// nothing after [close].
   void add(T event) {
     if (_ctl.isClosed) return;
     if (_ctl.hasListener) {
@@ -32,5 +36,6 @@ class BufferedBroadcast<T> {
     held.forEach(_ctl.add);
   }
 
+  /// Closes the stream.
   Future<void> close() => _ctl.close();
 }

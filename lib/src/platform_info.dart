@@ -21,6 +21,7 @@ abstract class DakPlatformInfo {
   int utcOffsetMinutes();
 }
 
+/// [DakPlatformInfo] from package_info_plus, device_info_plus and the platform.
 class DefaultPlatformInfo implements DakPlatformInfo {
   @override
   String get platform {
