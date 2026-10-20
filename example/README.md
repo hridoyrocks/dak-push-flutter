@@ -25,3 +25,14 @@ Send a test push from the server:
 ```bash
 dak send <app id> --all --title "Hello" --body "From Dak" --url "example://home" --wait
 ```
+
+Try the new message options:
+
+```bash
+curl https://push.example.com/v1/messages -H "Authorization: Bearer $DAK_REST_KEY" -H "Content-Type: application/json" -d '{
+  "target": {"all": true},
+  "title": "Hi {{name|friend}}", "body": "Tap a button",
+  "translations": {"bn": {"title": "হ্যালো {{name|বন্ধু}}", "body": "একটা button চাপুন"}},
+  "buttons": [{"id": "yes", "text": "Yes", "url": "example://yes"}, {"id": "no", "text": "No"}]
+}'
+```

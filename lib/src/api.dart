@@ -54,8 +54,17 @@ class DakApi {
     await _send('PATCH', _uri('/devices/$deviceId'), body, secret);
   }
 
-  Future<void> opened(String deviceId, String secret, String messageId) async {
-    await _send('POST', _uri('/devices/$deviceId/opened'), {'message_id': messageId}, secret);
+  /// A tap on a notification, or on its button [actionId].
+  Future<void> opened(String deviceId, String secret, String messageId, {String? actionId}) async {
+    await _send('POST', _uri('/devices/$deviceId/opened'), {
+      'message_id': messageId,
+      if (actionId != null) 'action_id': actionId,
+    }, secret);
+  }
+
+  /// Receipts: these messages arrived on the device (at most 50).
+  Future<void> delivered(String deviceId, String secret, List<String> messageIds) async {
+    await _send('POST', _uri('/devices/$deviceId/delivered'), {'message_ids': messageIds}, secret);
   }
 
   Future<http.Response> _send(String method, Uri uri, Map<String, Object?> body, String? secret) async {

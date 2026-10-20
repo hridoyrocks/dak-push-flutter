@@ -1,20 +1,18 @@
 # dak_push
 
-Flutter SDK for [Dak](../../../README.md), a self-hosted push notification
-server. It registers the device's FCM token with your Dak server, links it to
-your user, keeps tags, and reports when a notification is opened.
+Flutter SDK for [Dak](https://github.com/hridoyrocks/dak-push), a self-hosted
+push notification server. It registers the device with your Dak server, links
+it to your user, keeps tags, and reports deliveries, opens and button taps.
 
 Android and iOS. Delivery goes through your own Firebase project (FCM, and
-APNs via the key in Firebase), so pushes cost nothing.
+APNs via the key in Firebase), so pushes cost nothing. Works with
+firebase_messaging 15, 16 and 17.
 
 ## Install
 
 ```yaml
 dependencies:
-  dak_push:
-    git:
-      url: https://github.com/hridoyrocks/dak-push.git
-      path: sdk/flutter/dak_push
+  dak_push: ^0.2.0
 ```
 
 The app needs Firebase set up as usual (`google-services.json`,
@@ -24,7 +22,14 @@ other push SDKs (OneSignal) so only one library handles notifications.
 ## Use
 
 ```dart
-await Dak.init(appId: 'APP_ID', baseUrl: 'https://push.example.com');
+await Dak.init(
+  appId: 'APP_ID',
+  baseUrl: 'https://push.example.com',
+  options: const DakOptions(
+    shareTimezoneOffset: true,           // optional, see "Local time"
+    iosAppGroup: 'group.com.example.app', // optional, see "iOS extension"
+  ),
+);
 
 // Ask when it makes sense in your app (iOS, Android 13+).
 await Dak.requestPermission();
@@ -33,21 +38,89 @@ await Dak.requestPermission();
 await Dak.login(user.id, authHash: user.pushAuthHash);
 await Dak.logout();
 
-await Dak.setTags({'level': 'b2', 'premium': true});
+await Dak.setTags({'name': 'Rahim', 'level': 'b2', 'premium': true});
 await Dak.deleteTags(['level']);
 await Dak.setSubscribed(false); // user turned pushes off in your settings
 
-// Deep links. The SDK reports the open to the server by itself.
+// Deep links. The SDK reports the open (and the tapped button) itself.
 final launch = Dak.initialNotification; // tapped to start the app
-Dak.onOpened.listen((n) => router.go(n.url ?? '/'));
+Dak.onOpened.listen((n) {
+  if (n.actionId == 'accept') acceptRequest(n.data['request_id']);
+  router.go(n.url ?? '/'); // the button's own URL if it has one
+});
 
-// While the app is open, Android shows nothing by itself.
-Dak.onForeground.listen((n) => showInAppBanner(n.title, n.body));
+// While the app is open, Android shows nothing by itself. Silent (data
+// only) pushes arrive here too, with no title or body.
+Dak.onForeground.listen((n) => n.isSilent ? sync(n.data) : showInAppBanner(n.title, n.body));
+
+await Dak.setBadge(0); // iOS
 ```
 
 `login` and `setTags` throw `DakException` only for mistakes the app must fix
 (wrong auth hash, bad tag). Network problems never throw: changes are saved and
 sent later, also after an app restart.
+
+## Delivered receipts
+
+The "delivered" count on a message counts phones that reported the push
+arrived:
+
+- **Android:** `Dak.init` registers a `FirebaseMessaging.onBackgroundMessage`
+  handler that reports pushes arriving in the background; the app reports the
+  ones arriving while it is open. Firebase allows one background handler per
+  app. If your app has its own, turn Dak's off and call Dak from yours:
+
+  ```dart
+  @pragma('vm:entry-point')
+  Future<void> myBackgroundHandler(RemoteMessage message) async {
+    await Dak.handleBackgroundMessage(message);
+    // … your own work
+  }
+
+  FirebaseMessaging.onBackgroundMessage(myBackgroundHandler);
+  await Dak.init(appId: …, baseUrl: …, options: const DakOptions(handleBackgroundMessages: false));
+  ```
+
+- **iOS:** iOS does not wake the app for visible pushes, so receipts come from
+  a Notification Service Extension: see
+  [iOS extension](doc/ios-notification-service-extension.md). Without it iOS
+  pushes are still sent and opened; they are just not counted as delivered
+  until opened.
+
+Receipts that cannot be sent (no network) are kept and sent on the next start.
+
+## Buttons
+
+A message can have up to 3 buttons (`buttons` in the API). The tap opens the
+app; `n.actionId` is the button's id and the server counts taps per button.
+
+- **Android:** FCM's own notifications cannot have buttons, so Dak sends such
+  messages as data and this SDK shows them (title, body, image, buttons,
+  channel). Devices with SDK 0.1 get the same notification without buttons.
+- **iOS:** the [notification service extension](doc/ios-notification-service-extension.md)
+  adds the buttons. With firebase_messaging 17 the tapped button comes from
+  Firebase. With 15 or 16 the SDK reads it from the notification response,
+  which needs your `AppDelegate` to be the notification center's delegate
+  (`UNUserNotificationCenter.current().delegate = self` in
+  `didFinishLaunchingWithOptions`, before `super`).
+
+A message that arrives while the app is open is not shown on Android (like
+any FCM message); `Dak.showNotification(n)` shows it with its buttons if you
+want that.
+
+## Languages
+
+The server picks a message's title and body by the device's language
+(`translations` in the API), so nothing is needed in the app. The SDK sends the
+phone's language code.
+
+## Local time
+
+With `DakOptions(shareTimezoneOffset: true)` the SDK sends the phone's UTC
+offset in minutes (+360 in Bangladesh), and again when it changes. Only the
+offset: no timezone name, city or location. The server uses it for messages
+with `local_time` ("send at 09:00 for each user") and for quiet hours. Without
+it the app's timezone (set on the server) is used.
 
 ## Identity verification
 
@@ -63,8 +136,9 @@ your server, for example in Laravel:
 ## Notification channels (Android)
 
 A message's `android_channel` must be a channel your app created; otherwise
-Android uses Firebase's fallback channel. Create channels at startup (for
-example with `flutter_local_notifications`) and name the default one in
+Android uses Firebase's fallback channel (and the SDK, for messages it shows,
+your default channel or a "Notifications" channel). Create channels at startup
+(for example with `flutter_local_notifications`) and name the default one in
 `AndroidManifest.xml`:
 
 ```xml
@@ -73,15 +147,20 @@ example with `flutter_local_notifications`) and name the default one in
     android:value="general" />
 ```
 
-## What is stored
-
-The SDK sends: the FCM token, platform, app/OS/SDK version, language, whether
-notifications are allowed, the user id and tags you set. Nothing else: no IP,
-location, phone number, email or device model.
+The SDK also uses Firebase's `default_notification_icon` and
+`default_notification_color` meta-data for the notifications it shows.
 
 ## Firebase Installation IDs
 
 firebase_messaging 17 deprecates registration tokens in favour of Firebase
-Installation IDs (`register()` / `onRegistered`). This version still uses tokens
-so it works with firebase_messaging 15–17; the server already accepts FIDs
-(`token_type: "fid"`), so a later SDK version can switch without server changes.
+Installation IDs (`register()` / `onRegistered`). With 17 the SDK registers
+and sends the FID (`token_type: "fid"`); with 15 and 16, which do not have
+`register()`, it sends the token as before. `DakOptions(useFid: false)` keeps
+tokens on 17 too.
+
+## What is stored
+
+The SDK sends: the push token or FID, platform, app/OS/SDK version, language,
+whether notifications are allowed, the user id and tags you set, and the UTC
+offset only if you turn it on. Nothing else: no IP, location, phone number,
+email or device model.

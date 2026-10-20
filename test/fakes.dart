@@ -12,6 +12,8 @@ class FakeServer {
   final devices = <String, Map<String, dynamic>>{};
   final requests = <({String method, String path, Map<String, dynamic> body})>[];
   final opened = <String>[];
+  final openedActions = <String?>[];
+  final delivered = <String>[];
   bool offline = false;
   int _n = 0;
 
@@ -46,8 +48,13 @@ class FakeServer {
       _apply(d, body);
       return _json(200, {'device': {}});
     }
-    if (req.method == 'POST' && parts.length == 7) {
+    if (req.method == 'POST' && parts.length == 7 && parts[6] == 'opened') {
       opened.add(body['message_id'] as String);
+      openedActions.add(body['action_id'] as String?);
+      return http.Response('', 204);
+    }
+    if (req.method == 'POST' && parts.length == 7 && parts[6] == 'delivered') {
+      delivered.addAll((body['message_ids'] as List).cast<String>());
       return http.Response('', 204);
     }
     return _json(404, {'error': {'code': 'not_found', 'message': ''}});
@@ -74,6 +81,7 @@ class FakeServer {
 
 class FakeMessaging implements DakMessaging {
   String? token = 'fcm-token-1';
+  String tokenType = 'token';
   bool permission = false;
   bool grantOnRequest = true;
   DakNotification? initial;
@@ -82,10 +90,10 @@ class FakeMessaging implements DakMessaging {
   final foreground = StreamController<DakNotification>.broadcast();
 
   @override
-  Future<String?> getToken() async => token;
+  Future<DakPushToken?> getPushToken() async => token == null ? null : DakPushToken(token!, type: tokenType);
 
   @override
-  Stream<String> get onTokenRefresh => tokenRefresh.stream;
+  Stream<DakPushToken> get onPushToken => tokenRefresh.stream.map((t) => DakPushToken(t, type: tokenType));
 
   @override
   Future<bool> hasPermission() async => permission;
@@ -108,6 +116,10 @@ class FakeMessaging implements DakMessaging {
 
 class FakePlatform implements DakPlatformInfo {
   String version = '8.0.2+533';
+  int offset = 360;
+
+  @override
+  int utcOffsetMinutes() => offset;
 
   @override
   String get platform => 'android';
@@ -122,13 +134,49 @@ class FakePlatform implements DakPlatformInfo {
   String language() => 'bn';
 }
 
+class FakeNative implements DakNative {
+  DakNotification? initial;
+  final actions = StreamController<DakNotification>.broadcast();
+  final iosActions = <String, String>{};
+  final shared = <({String group, Map<String, String> values})>[];
+  int? badge;
+  String? badgeGroup;
+  final shown = <Map<String, String>>[];
+
+  @override
+  Future<DakNotification?> initialAction() async => initial;
+
+  @override
+  Stream<DakNotification> get onAction => actions.stream;
+
+  @override
+  Future<String?> takeAction(String messageId) async => iosActions.remove(messageId);
+
+  @override
+  Future<void> shareWithExtension(String appGroup, Map<String, String> values) async =>
+      shared.add((group: appGroup, values: values));
+
+  @override
+  Future<void> setBadge(int count, {String? appGroup}) async {
+    badge = count;
+    badgeGroup = appGroup;
+  }
+
+  @override
+  Future<void> show(Map<String, String> data) async => shown.add(data);
+}
+
 class Harness {
-  Harness({MemoryDakStorage? storage}) : storage = storage ?? MemoryDakStorage();
+  Harness({MemoryDakStorage? storage, this.shareTimezoneOffset = false, this.iosAppGroup})
+      : storage = storage ?? MemoryDakStorage();
 
   final server = FakeServer();
   final messaging = FakeMessaging();
   final platform = FakePlatform();
+  final native = FakeNative();
   final MemoryDakStorage storage;
+  final bool shareTimezoneOffset;
+  final String? iosAppGroup;
   DateTime now = DateTime(2026, 10, 20, 12);
 
   late final client = build();
@@ -138,6 +186,9 @@ class Harness {
         messaging: messaging,
         storage: storage,
         platform: platform,
+        native: native,
+        shareTimezoneOffset: shareTimezoneOffset,
+        iosAppGroup: iosAppGroup,
         retryDelays: const [], // tests call flush() instead of waiting
         clock: () => now,
       );

@@ -1,13 +1,16 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
+
 import 'api.dart';
 import 'messaging.dart';
+import 'native.dart';
 import 'notification.dart';
 import 'platform_info.dart';
 import 'storage.dart';
 
-const kDakSdkVersion = '0.1.0';
+const kDakSdkVersion = '0.2.0';
 
 /// A problem the app has to fix, such as a wrong auth hash or a bad tag.
 /// Network trouble never throws: changes are kept and sent later.
@@ -22,6 +25,10 @@ class DakException implements Exception {
 
 final _tagKey = RegExp(r'^[A-Za-z0-9_.:-]{1,64}$');
 
+/// hex(sha256(device secret)): what the iOS notification service extension
+/// holds. It can report deliveries and nothing else.
+String receiptToken(String deviceSecret) => sha256.convert(utf8.encode(deviceSecret)).toString();
+
 /// The SDK's logic: it keeps the state the app wants (token, user, tags,
 /// permission) and the state the server last accepted, and sends the
 /// difference whenever they differ. Everything is saved, so changes made
@@ -32,7 +39,10 @@ class DakClient {
     required this.messaging,
     required this.storage,
     required this.platform,
+    this.native = const NoDakNative(),
     this.sdkVersion = kDakSdkVersion,
+    this.shareTimezoneOffset = false,
+    this.iosAppGroup,
     this.lastSeenInterval = const Duration(hours: 12),
     this.retryDelays = const [
       Duration(seconds: 5),
@@ -49,7 +59,14 @@ class DakClient {
   final DakMessaging messaging;
   final DakStorage storage;
   final DakPlatformInfo platform;
+  final DakNative native;
   final String sdkVersion;
+
+  /// Send the phone's UTC offset, for local-time delivery and quiet hours.
+  final bool shareTimezoneOffset;
+
+  /// iOS: the App Group shared with the notification service extension.
+  final String? iosAppGroup;
   final Duration lastSeenInterval;
   final List<Duration> retryDelays;
   final DateTime Function() _now;
@@ -59,19 +76,22 @@ class DakClient {
   String? _deviceId;
   String? _secret;
   String? _token;
+  String _tokenType = 'token';
   String? _externalId;
   String? _authHash;
   Map<String, String> _tags = {};
   bool _subscribed = true;
   Map<String, Object?> _reported = {};
   DateTime? _lastSeenSent;
-  List<String> _opens = [];
+  List<({String id, String? action})> _opens = [];
+  List<String> _receipts = [];
 
   // Read at start.
   bool _permission = false;
   String _appVersion = '';
   String _osVersion = '';
   String _language = '';
+  int? _offset;
 
   final _openedCtl = StreamController<DakNotification>.broadcast();
   final _foregroundCtl = StreamController<DakNotification>.broadcast();
@@ -82,6 +102,7 @@ class DakClient {
   Timer? _retryTimer;
   int _failures = 0;
   bool _started = false;
+  String? _sharedWithExtension;
 
   String? get deviceId => _deviceId;
   String? get externalId => _externalId;
@@ -96,23 +117,38 @@ class DakClient {
     if (_started) return;
     _started = true;
     await _load();
+    await _takeBackgroundReceipts();
     _appVersion = await platform.appVersion();
     _osVersion = await platform.osVersion();
     _language = platform.language();
+    _offset = shareTimezoneOffset ? platform.utcOffsetMinutes() : null;
     _permission = await messaging.hasPermission();
     try {
-      _token = await messaging.getToken() ?? _token;
+      final t = await messaging.getPushToken();
+      if (t != null) {
+        _token = t.value;
+        _tokenType = t.type;
+      }
     } catch (e) {
-      _log('dak: could not get an FCM token yet: $e');
+      _log('dak: could not get a push token yet: $e');
     }
-    _subs.add(messaging.onTokenRefresh.listen((t) {
-      _token = t;
+    _subs.add(messaging.onPushToken.listen((t) {
+      _token = t.value;
+      _tokenType = t.type;
       unawaited(_save().then((_) => _syncQuietly()));
     }));
-    _subs.add(messaging.onOpened.listen(_handleOpen));
-    _subs.add(messaging.onForeground.listen(_foregroundCtl.add));
-    _initial = await messaging.getInitialNotification();
-    if (_initial?.id != null) _queueOpen(_initial!.id!);
+    _subs.add(messaging.onOpened.listen((n) => unawaited(_handleOpen(n))));
+    _subs.add(native.onAction.listen((n) => unawaited(_handleOpen(n))));
+    _subs.add(messaging.onForeground.listen((n) {
+      if (n.id != null) _queueReceipt(n.id!);
+      _foregroundCtl.add(n);
+    }));
+    var initial = await messaging.getInitialNotification() ?? await native.initialAction();
+    if (initial != null) {
+      initial = await _withIOSAction(initial);
+      _initial = initial;
+      if (initial.id != null) _queueOpen(initial.id!, initial.actionId);
+    }
     await _save();
     await _syncQuietly();
   }
@@ -177,11 +213,17 @@ class DakClient {
     await _sync();
   }
 
+  /// iOS: sets the app icon badge; later badge_increment pushes add to it.
+  Future<void> setBadge(int count) => native.setBadge(count < 0 ? 0 : count, appGroup: iosAppGroup);
+
   /// Call when the app comes back to the foreground: picks up permission
-  /// changes made in system settings and keeps last_seen fresh.
+  /// changes made in system settings, receipts from the background, a new
+  /// UTC offset, and keeps last_seen fresh.
   Future<void> onResume() async {
     if (!_started) return;
     _permission = await messaging.hasPermission();
+    if (shareTimezoneOffset) _offset = platform.utcOffsetMinutes();
+    await _takeBackgroundReceipts();
     await _syncQuietly();
   }
 
@@ -197,22 +239,55 @@ class DakClient {
     await _foregroundCtl.close();
   }
 
-  void _handleOpen(DakNotification n) {
-    if (n.id != null) _queueOpen(n.id!);
+  /// iOS with firebase_messaging 15/16: RemoteMessage has no action id, the
+  /// plugin may have it.
+  Future<DakNotification> _withIOSAction(DakNotification n) async {
+    if (n.actionId != null || n.id == null || n.buttons.isEmpty) return n;
+    final action = await native.takeAction(n.id!);
+    return action == null ? n : n.withAction(action);
+  }
+
+  Future<void> _handleOpen(DakNotification n) async {
+    n = await _withIOSAction(n);
+    if (n.id != null) _queueOpen(n.id!, n.actionId);
     _openedCtl.add(n);
   }
 
-  void _queueOpen(String id) {
-    if (_opens.contains(id)) return;
-    _opens = [..._opens, id];
+  void _queueOpen(String id, String? action) {
+    if (_opens.any((o) => o.id == id)) return;
+    _opens = [..._opens, (id: id, action: action)];
     if (_opens.length > 50) _opens = _opens.sublist(_opens.length - 50);
     unawaited(_save().then((_) => _syncQuietly()));
+  }
+
+  void _queueReceipt(String id) {
+    if (_receipts.contains(id)) return;
+    _receipts = [..._receipts, id];
+    if (_receipts.length > 200) _receipts = _receipts.sublist(_receipts.length - 200);
+    unawaited(_save().then((_) => _syncQuietly()));
+  }
+
+  /// Picks up receipts the background handler saved.
+  Future<void> _takeBackgroundReceipts() async {
+    try {
+      final raw = await storage.readReceipts();
+      if (raw == null || raw.isEmpty) return;
+      await storage.writeReceipts('');
+      final ids = (jsonDecode(raw) as List).cast<String>();
+      for (final id in ids) {
+        if (!_receipts.contains(id)) _receipts = [..._receipts, id];
+      }
+      await _save();
+    } catch (e) {
+      _log('dak: ignoring unreadable receipts: $e');
+    }
   }
 
   // ---- sync
 
   Map<String, Object?> _desired() => {
         'token': _token,
+        'token_type': _tokenType,
         'platform': platform.platform,
         'app_version': _appVersion,
         'os_version': _osVersion,
@@ -221,6 +296,7 @@ class DakClient {
         'push_permission': _permission,
         'subscribed': _subscribed,
         'external_id': _externalId,
+        'utc_offset_minutes': _offset,
         'tags': Map<String, String>.of(_tags),
       };
 
@@ -246,7 +322,9 @@ class DakClient {
       _again = false;
       try {
         await _syncOnce();
+        await _shareWithExtension();
         await _sendOpens();
+        await _sendReceipts();
         _failures = 0;
         _retryTimer?.cancel();
       } on DakApiException catch (e) {
@@ -298,6 +376,7 @@ class DakClient {
       } else {
         body['auth_hash'] = _authHash;
       }
+      if (_offset == null) body.remove('utc_offset_minutes');
       final reg = await api.register(body);
       _deviceId = reg.deviceId;
       _secret = reg.deviceSecret;
@@ -308,7 +387,13 @@ class DakClient {
     }
 
     final patch = <String, Object?>{};
-    for (final f in ['token', 'platform', 'app_version', 'os_version', 'sdk_version', 'language', 'push_permission', 'subscribed']) {
+    // A token is always sent with its type, which the server would otherwise
+    // reset to "token".
+    if (desired['token'] != _reported['token'] || desired['token_type'] != (_reported['token_type'] ?? 'token')) {
+      patch['token'] = desired['token'];
+      patch['token_type'] = desired['token_type'];
+    }
+    for (final f in ['platform', 'app_version', 'os_version', 'sdk_version', 'language', 'push_permission', 'subscribed', 'utc_offset_minutes']) {
       if (desired[f] != _reported[f]) patch[f] = desired[f];
     }
     if (desired['external_id'] != _reported['external_id']) {
@@ -347,15 +432,44 @@ class DakClient {
     await _save();
   }
 
+  /// iOS: gives the notification service extension what it needs to report
+  /// deliveries. Only the receipt token, never the device secret.
+  Future<void> _shareWithExtension() async {
+    final group = iosAppGroup;
+    if (group == null || _deviceId == null || _secret == null) return;
+    final key = '$_deviceId:$_secret';
+    if (_sharedWithExtension == key) return;
+    await native.shareWithExtension(group, {
+      'base_url': api.baseUrl,
+      'app_id': api.appId,
+      'device_id': _deviceId!,
+      'receipt_token': receiptToken(_secret!),
+    });
+    _sharedWithExtension = key;
+  }
+
   Future<void> _sendOpens() async {
     while (_opens.isNotEmpty && _deviceId != null && _secret != null) {
-      final id = _opens.first;
+      final o = _opens.first;
       try {
-        await api.opened(_deviceId!, _secret!, id);
+        await api.opened(_deviceId!, _secret!, o.id, actionId: o.action);
       } on DakApiException catch (e) {
         if (!e.isPermanent && !e.isUnauthorized) rethrow;
       }
       _opens = _opens.sublist(1);
+      await _save();
+    }
+  }
+
+  Future<void> _sendReceipts() async {
+    while (_receipts.isNotEmpty && _deviceId != null && _secret != null) {
+      final batch = _receipts.take(50).toList();
+      try {
+        await api.delivered(_deviceId!, _secret!, batch);
+      } on DakApiException catch (e) {
+        if (!e.isPermanent && !e.isUnauthorized) rethrow;
+      }
+      _receipts = _receipts.skip(batch.length).toList();
       await _save();
     }
   }
@@ -370,6 +484,7 @@ class DakClient {
       _deviceId = js['device_id'] as String?;
       _secret = js['secret'] as String?;
       _token = js['token'] as String?;
+      _tokenType = js['token_type'] as String? ?? 'token';
       _externalId = js['external_id'] as String?;
       _authHash = js['auth_hash'] as String?;
       _tags = (js['tags'] as Map?)?.map((k, v) => MapEntry(k as String, v as String)) ?? {};
@@ -377,23 +492,33 @@ class DakClient {
       _reported = (js['reported'] as Map?)?.cast<String, Object?>() ?? {};
       final seen = js['last_seen_sent'] as String?;
       _lastSeenSent = seen == null ? null : DateTime.tryParse(seen);
-      _opens = (js['opens'] as List?)?.cast<String>() ?? [];
+      _opens = [
+        for (final o in (js['opens'] as List?) ?? const [])
+          // Version 1 kept only message ids.
+          if (o is String) (id: o, action: null) else if (o is Map) (id: o['id'] as String, action: o['action'] as String?),
+      ];
+      _receipts = (js['receipts'] as List?)?.cast<String>() ?? [];
     } catch (e) {
       _log('dak: ignoring unreadable saved state: $e');
     }
   }
 
   Future<void> _save() => storage.write(jsonEncode({
-        'v': 1,
+        'v': 2,
+        // For the background handler, which has no DakClient.
+        'base_url': api.baseUrl,
+        'app_id': api.appId,
         'device_id': _deviceId,
         'secret': _secret,
         'token': _token,
+        'token_type': _tokenType,
         'external_id': _externalId,
         'auth_hash': _authHash,
         'tags': _tags,
         'subscribed': _subscribed,
         'reported': _reported,
         'last_seen_sent': _lastSeenSent?.toIso8601String(),
-        'opens': _opens,
+        'opens': [for (final o in _opens) {'id': o.id, if (o.action != null) 'action': o.action}],
+        'receipts': _receipts,
       }));
 }

@@ -12,7 +12,12 @@ Future<void> main() async {
   await Dak.init(
     appId: appId,
     baseUrl: baseUrl,
-    options: const DakOptions(showInForegroundOnIOS: true, debugLogs: true),
+    options: const DakOptions(
+      showInForegroundOnIOS: true,
+      debugLogs: true,
+      shareTimezoneOffset: true,
+      // iosAppGroup: 'group.com.example.dak', // with the notification service extension
+    ),
   );
   runApp(const ExampleApp());
 }
@@ -42,9 +47,15 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     final launch = Dak.initialNotification;
-    if (launch != null) _events.add('Launched from: ${launch.title} → ${launch.url}');
-    _subs.add(Dak.onOpened.listen((n) => setState(() => _events.add('Opened: ${n.title} → ${n.url}'))));
-    _subs.add(Dak.onForeground.listen((n) => setState(() => _events.add('While open: ${n.title}: ${n.body}'))));
+    if (launch != null) _events.add('Launched from: ${launch.title} → ${launch.url} (button: ${launch.actionId})');
+    _subs.add(Dak.onOpened.listen(
+      (n) => setState(() => _events.add('Opened: ${n.title} → ${n.url} (button: ${n.actionId})')),
+    ));
+    _subs.add(Dak.onForeground.listen((n) {
+      setState(() => _events.add(n.isSilent ? 'Silent: ${n.data}' : 'While open: ${n.title}: ${n.body}'));
+      // Show messages with buttons the way they look in the background.
+      if (n.buttons.isNotEmpty) Dak.showNotification(n);
+    }));
   }
 
   @override
@@ -93,9 +104,10 @@ class _HomePageState extends State<HomePage> {
             ),
             TextButton(onPressed: () => _run('Logout', Dak.logout), child: const Text('Logout')),
             TextButton(
-              onPressed: () => _run('Tag', () => Dak.setTags({'example': true})),
-              child: const Text('Tag example=true'),
+              onPressed: () => _run('Tag', () => Dak.setTags({'example': true, 'name': 'Rahim'})),
+              child: const Text('Tag example, name'),
             ),
+            TextButton(onPressed: () => _run('Badge', Dak.clearBadge), child: const Text('Clear badge')),
           ]),
           Text(_status),
           const Divider(),

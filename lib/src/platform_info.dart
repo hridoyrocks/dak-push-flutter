@@ -5,13 +5,18 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 /// Facts about the install the server uses for targeting. Nothing that
-/// identifies the person or the phone: no model, no IP, no location.
+/// identifies the person or the phone: no model, no IP, no location (the UTC
+/// offset only if the app opts in).
 abstract class DakPlatformInfo {
   /// "android" or "ios".
   String get platform;
   Future<String> appVersion();
   Future<String> osVersion();
   String language();
+
+  /// The phone's UTC offset in minutes right now (+360 in Bangladesh). Sent
+  /// only with DakOptions(shareTimezoneOffset: true).
+  int utcOffsetMinutes();
 }
 
 class DefaultPlatformInfo implements DakPlatformInfo {
@@ -38,4 +43,7 @@ class DefaultPlatformInfo implements DakPlatformInfo {
 
   @override
   String language() => PlatformDispatcher.instance.locale.languageCode.toLowerCase();
+
+  @override
+  int utcOffsetMinutes() => DateTime.now().timeZoneOffset.inMinutes;
 }

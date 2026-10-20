@@ -12,10 +12,11 @@ void main() {
     final body = h.server.requests.single.body;
     expect(body, {
       'token': 'fcm-token-1',
+      'token_type': 'token',
       'platform': 'android',
       'app_version': '8.0.2+533',
       'os_version': '14',
-      'sdk_version': '0.1.0',
+      'sdk_version': '0.2.0',
       'language': 'bn',
       'push_permission': false,
       'subscribed': true,
@@ -112,7 +113,7 @@ void main() {
     await h.client.start();
     h.messaging.tokenRefresh.add('fcm-token-2');
     await settle();
-    expect(h.server.requests.last.body, {'token': 'fcm-token-2'});
+    expect(h.server.requests.last.body, {'token': 'fcm-token-2', 'token_type': 'token'});
     expect(h.server.devices['dev-1']!['token'], 'fcm-token-2');
   });
 
