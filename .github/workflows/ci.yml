@@ -98,8 +98,11 @@ jobs:
           - name: firebase_messaging 17
             flutter: '3.35.7'
             setup: flutter pub add 'firebase_messaging:>=17.0.0 <18.0.0'
+          # On the oldest Flutter, because the lowest versions are from its
+          # time: win32 5.0.0 (via device_info_plus 10.0) does not compile on
+          # Dart 3.5+.
           - name: lowest dependencies
-            flutter: '3.35.7'
+            flutter: '3.22.3'
             setup: flutter pub downgrade
           - name: oldest Flutter
             flutter: '3.22.3'
