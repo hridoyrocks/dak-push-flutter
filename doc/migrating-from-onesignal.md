@@ -48,6 +48,7 @@ Remove `onesignal_flutter` from `pubspec.yaml` and add `dak_push` (see
 | `OneSignal.User.addTags({...})`, `addTagWithKey` | `await Dak.setTags({...})` (strings, numbers, booleans) |
 | `OneSignal.User.removeTags([...])`, `removeTag` | `await Dak.deleteTags([...])` |
 | `OneSignal.User.pushSubscription.optOut()` / `optIn()` | `await Dak.setSubscribed(false)` / `true` |
+| `OneSignal.User.pushSubscription.id`, `addObserver` | `Dak.deviceId`, `Dak.onDeviceId.listen(...)` |
 | `OneSignal.Notifications.addClickListener` | `Dak.onOpened.listen(...)`, plus `Dak.initialNotification` for the tap that launched the app |
 | `event.result.actionId` (button) | `notification.actionId` |
 | `event.notification.additionalData` | `notification.data` |

@@ -121,6 +121,14 @@ never holds the splash screen. Calls made meanwhile (`login`, `setTags`) wait
 for the saved state and then sync. Taps that come before you listen to
 `onOpened` are kept for your first listener.
 
+So on a first start `Dak.deviceId` is still null when `Dak.init` returns.
+`Dak.onDeviceId` gives the id at once if it is known, and otherwise when the
+device registers (and a new one if it ever registers again):
+
+```dart
+Dak.onDeviceId.listen((id) => api.saveDakDevice(id)); // e.g. for support tools
+```
+
 `login` and `setTags` throw `DakException` only for mistakes the app must fix
 (wrong auth hash, bad tag). Only the refused field is rolled back: an opt-out
 sent with a wrong auth hash still goes through. Network problems never throw:

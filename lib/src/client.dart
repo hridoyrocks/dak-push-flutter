@@ -159,6 +159,7 @@ class DakClient {
   final _opened = BufferedBroadcast<DakNotification>();
   final _foregroundCtl = StreamController<DakNotification>.broadcast();
   final _registeredCtl = StreamController<void>.broadcast();
+  final _deviceIdCtl = StreamController<String>.broadcast();
   final _errorsCtl = StreamController<DakException>.broadcast();
   final _loaded = Completer<void>();
   final _ready = Completer<void>();
@@ -213,6 +214,21 @@ class DakClient {
 
   /// Fires when the device is registered (again), so it now has credentials.
   Stream<void> get onRegistered => _registeredCtl.stream;
+
+  /// The device id: the current one at once if there is one, then each new
+  /// one (the saved id once it is read, the first registration, registering
+  /// again after the server forgot the device). Never the same id twice in a
+  /// row, and never null.
+  Stream<String> get onDeviceId => Stream.multi((listener) {
+        var last = _deviceId;
+        if (last != null) listener.add(last);
+        final sub = _deviceIdCtl.stream.listen((id) {
+          if (id == last) return;
+          last = id;
+          listener.add(id);
+        }, onDone: listener.close);
+        listener.onCancel = sub.cancel;
+      });
 
   /// The notification the user tapped to open the app, if any.
   DakNotification? get initialNotification => _initial;
@@ -424,6 +440,7 @@ class DakClient {
     await _opened.close();
     await _foregroundCtl.close();
     await _registeredCtl.close();
+    await _deviceIdCtl.close();
     await _errorsCtl.close();
   }
 
@@ -642,6 +659,7 @@ class DakClient {
       _lastSeenSent = _now();
       await _save();
       if (!_registeredCtl.isClosed) _registeredCtl.add(null);
+      _announceDeviceId();
       return;
     }
 
@@ -839,7 +857,13 @@ class DakClient {
   void _loadedNow() {
     if (_loaded.isCompleted) return;
     _loaded.complete();
+    _announceDeviceId(); // the saved one, for listeners from before the load
     _checkReady();
+  }
+
+  void _announceDeviceId() {
+    final id = _deviceId;
+    if (id != null && !_deviceIdCtl.isClosed) _deviceIdCtl.add(id);
   }
 
   void _scheduleLoadRetry() {

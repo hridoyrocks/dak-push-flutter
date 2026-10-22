@@ -281,8 +281,20 @@ class Dak {
   static DakNotification? get initialNotification => _c.initialNotification;
 
   /// This device's id on the Dak server, or null before it is registered.
-  /// Useful to find the device in the dashboard.
+  /// Useful to find the device in the dashboard. [Dak.init] returns before
+  /// a new device registers; listen to [onDeviceId] to get the id when it
+  /// comes.
   static String? get deviceId => _client?.deviceId;
+
+  /// This device's id on the Dak server: the current one at once when there
+  /// is one, then each new one (the first registration, which comes after
+  /// [Dak.init] returns, or registering again after the server forgot the
+  /// device). Never null, and never the same id twice in a row.
+  ///
+  /// ```dart
+  /// Dak.onDeviceId.listen((id) => myServer.saveDakDevice(id));
+  /// ```
+  static Stream<String> get onDeviceId => _c.onDeviceId;
 
   // ---- in-app messages
 
