@@ -44,16 +44,12 @@ class _HomePageState extends State<HomePage> {
   final _subs = <StreamSubscription<Object>>[];
   String _status = '';
   String? _deviceId = Dak.deviceId;
-  Timer? _deviceIdCheck;
 
   @override
   void initState() {
     super.initState();
-    // Dak.init returns before the device is registered, and the id can change
-    // when the device registers again; check it once a second.
-    _deviceIdCheck = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (Dak.deviceId != _deviceId) setState(() => _deviceId = Dak.deviceId);
-    });
+    // Dak.init returns before a new device is registered.
+    _subs.add(Dak.onDeviceId.listen((id) => setState(() => _deviceId = id)));
     final launch = Dak.initialNotification;
     if (launch != null) _events.add('Launched from: ${launch.title} → ${launch.url} (button: ${launch.actionId})');
     _subs.add(Dak.onOpened.listen(
@@ -69,7 +65,6 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
-    _deviceIdCheck?.cancel();
     for (final s in _subs) {
       s.cancel();
     }

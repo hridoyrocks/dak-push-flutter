@@ -6,6 +6,9 @@ changes that need code or settings changes in apps.
 
 ## Unreleased
 
+- `Dak.onDeviceId`: the device id when it comes. `Dak.init` returns before a
+  new device registers, so `Dak.deviceId` is null at first; the stream gives
+  the current id at once, then a new one if the device registers again.
 - Example app: the device id shows up once the device registers (since 0.4.0
   that happens after the first frame), and the button rows wrap instead of
   overflowing on phones about 360 dp wide.
