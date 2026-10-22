@@ -4,6 +4,12 @@ All notable changes to dak_push. Versions follow [semantic versioning](https://s
 below 1.0 a breaking change raises the minor version. **Breaking** marks
 changes that need code or settings changes in apps.
 
+## Unreleased
+
+- Example app: the device id shows up once the device registers (since 0.4.0
+  that happens after the first frame), and the button rows wrap instead of
+  overflowing on phones about 360 dp wide.
+
 ## 0.4.0 - 2026-10-21
 
 Correctness and robustness fixes from a review of the SDK.
