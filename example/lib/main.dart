@@ -43,10 +43,17 @@ class _HomePageState extends State<HomePage> {
   final _hash = TextEditingController();
   final _subs = <StreamSubscription<Object>>[];
   String _status = '';
+  String? _deviceId = Dak.deviceId;
+  Timer? _deviceIdCheck;
 
   @override
   void initState() {
     super.initState();
+    // Dak.init returns before the device is registered, and the id can change
+    // when the device registers again; check it once a second.
+    _deviceIdCheck = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (Dak.deviceId != _deviceId) setState(() => _deviceId = Dak.deviceId);
+    });
     final launch = Dak.initialNotification;
     if (launch != null) _events.add('Launched from: ${launch.title} → ${launch.url} (button: ${launch.actionId})');
     _subs.add(Dak.onOpened.listen(
@@ -62,6 +69,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    _deviceIdCheck?.cancel();
     for (final s in _subs) {
       s.cancel();
     }
@@ -84,7 +92,7 @@ class _HomePageState extends State<HomePage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          SelectableText('Device: ${Dak.deviceId ?? 'not registered yet'}'),
+          SelectableText('Device: ${_deviceId ?? 'not registered yet'}'),
           const SizedBox(height: 8),
           FilledButton(
             onPressed: () => _run('Permission', () async {
@@ -99,7 +107,8 @@ class _HomePageState extends State<HomePage> {
             controller: _hash,
             decoration: const InputDecoration(labelText: 'Auth hash (dak app identity-secret → HMAC)'),
           ),
-          Row(children: [
+          // Wrap, not Row: the buttons go onto a second line on narrow phones.
+          Wrap(children: [
             TextButton(
               onPressed: () => _run('Login', () => Dak.login(_user.text, authHash: _hash.text)),
               child: const Text('Login'),
@@ -111,7 +120,7 @@ class _HomePageState extends State<HomePage> {
             ),
             TextButton(onPressed: () => _run('Badge', Dak.clearBadge), child: const Text('Clear badge')),
           ]),
-          Row(children: [
+          Wrap(children: [
             TextButton(
               onPressed: () => Dak.addTrigger('screen', 'example'),
               child: const Text('Trigger screen=example'),
